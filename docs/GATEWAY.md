@@ -84,3 +84,45 @@ Também tratados pelo reducer (`lib/chat-store.ts`), conforme o contrato: `messa
   construído — o chip de modelo usa o `ProfileRow` do `profiles.list`, não esse campo.
 - Origin: o WS de `hermes serve` só aceita origens `http(s)://localhost|127.0.0.1`; um cliente
   Node sem header Origin conecta normalmente (smoke).
+
+## Gestão de sessões (abas, gaveta, Armazenamento) — validado 2026-11-01
+
+RPC e REST misturados de propósito: cada operação vai onde o backend é dono do caso.
+
+| Função (`lib/gateway.ts`) | Transporte | Contrato | Observações |
+|---|---|---|---|
+| `listSessionsAll` | `session.list` | `{profile, limit, include_hidden?}` | Sem `include_hidden` o backend omite ocultas; a gaveta faz as duas chamadas para marcar "oculta". O Bot Chat é filtrado sempre. |
+| `searchSessions` | `GET /api/sessions/search?q&limit&profile` | `{results:[{session_id, id, title, snippet, started_at, message_count, …}]}` | FTS com prefixo; `snippet` vem com marcadores `>>>`/`<<<` (removidos na UI). Fallback local por título se o REST falhar. |
+| `renameSession` | `session.title` (sessão VIVA) ou `PATCH /api/sessions/{id}` `{title, profile}` | `session.title` é `session_scoped` → 4001 para id que não está vivo | Recusa `"Bot Chat"` (identidade do canônico). Em side-chat fresh (sem linha), `session.title` materializa a linha. |
+| `setSessionHidden` | `session.set_hidden` | `{session_id:<runtime ou stored>, hidden, profile}` | → `{hidden, session_key}`; id desconhecido → 4001. |
+| `deleteSessionRpc` | `session.delete` | `{session_id:<stored>, profile}` | Recusa sessão viva (4023 "cannot delete an active session"); inexistente → 4007. A gaveta: se 4023 e fomos nós que abrimos (sem turno), `session.close` no runtime e tenta de novo. **Não** usamos `DELETE /api/sessions/{id}` aqui (apaga mesmo com agente vivo). |
+| `closeSession` | `session.close` | `{session_id:<runtime>}` | Teardown do runtime (`end_reason=tui_close`); registro intacto. Usado ao fechar aba sem turno rodando. |
+| `exportSession` | `GET /api/sessions/{id}/export?profile` | JSON `{…linha da sessão, messages:[…]}` (stream) | Baixado como `hermes-<profile>-<id>.json`. |
+| `restSessions` | `GET /api/sessions?profile&limit≤100&offset&archived=include&order=recent` | `{sessions, total, limit, offset}` | **Ocultas ficam de fora** (o Bot Chat não aparece — `total` conta ele). Linhas trazem `last_active`, `is_active` (ended_at nulo + atividade < janela), tokens. |
+| `bulkDeleteSessions` | `POST /api/sessions/bulk-delete` `{ids≤500, profile}` | `{ok, deleted}` | Apaga inclusive ativas/arquivadas → o StoragePanel bloqueia `is_active` e "Bot Chat" na seleção. |
+| `sessionStats` / `emptySessionCount` / `deleteEmptySessions` | `GET /api/sessions/stats`, `GET /api/sessions/empty/count`, `DELETE /api/sessions/empty` (todos `?profile`) | stats: `{total, active_store, archived, messages, by_source}` | "Vazia" = sem nenhuma linha em `messages`; ativas e arquivadas são puladas pelo backend. |
+| `modelInfo` | `GET /api/model/info?profile` | `{model, provider, effective_context_length, …}` | Contexto só do modelo configurado do profile (model.options não traz contexto por modelo). |
+| `setProfileDefaultModel` | `PUT /api/profiles/{name}/model` `{provider, model}` | `{ok}` | Grava o config.yaml **do profile** (não o do serve). Sem guarda de modelo caro — por isso o picker faz antes o `config.set --session` (que tem a guarda). |
+
+### Abas do chat
+
+- Bot Chat canônico sempre fixo na 1ª aba; nunca persistido (regra Bot Mode).
+- `localStorage["hermes-cockpit.chat.tabs.<profile>"]` = **só** os ids armazenados dos side-chats abertos, na ordem da faixa. Side-chat recém-criado (lazy, sem linha no DB) só entra depois do 1º prompt ou de um renomear.
+- Uma sessão resumida por vez (a aba ativa); abas em 2º plano continuam recebendo `message.start`/`message.complete` → ponto pulsante na aba.
+- `session.title` (evento do auto-titler: `session_id` runtime, `payload.title`) atualiza o título da aba.
+
+### Seletor de modelo — escopo (resolve a pendência da rodada anterior)
+
+- **este chat**: `config.set {session_id, profile, key:"model", value:"<m> --provider <p> --session"}`. No Bot Chat (`follow_profile_config`) vale até o próximo resume — a UI avisa.
+- **padrão do bot**: o mesmo `--session` na sessão viva (troca já + guarda de modelo caro) e depois `PUT /api/profiles/<bot>/model`. Não usamos mais `--global`: ele grava no profile da sessão (`_session_profile_runtime_scope`) e exige sessão viva (sem sessão → 4001); o `PUT` nomeia o profile explicitamente e funciona mesmo sem chat aberto.
+- Providers com `authenticated:false` e qualquer slug `*codex*` ficam fora da lista (o usuário não usa Codex).
+- `model.options {profile, session_id?, refresh?}` → por provider: `models[]`, `capabilities{model:{reasoning,fast}}`, `pricing{model:{input,output,free}}` (quando houver), `api_url` (local = localhost/127.0.0.1 ou slug ollama/lmstudio/…), `warning`, `unavailable_models`. Chief (2026-11-01): moa, anthropic(17), copilot(44), gemini(17), kimi-coding(13, atual), opencode-free(7), ollama(18, local) — `pricing` veio vazio para todos.
+
+### Armazenamento em disco (main, `src/main/ipc/storage.ts`)
+
+`storage:usage` → `{root, totalKb, categories:[{id,label,group,kb,paths,clean?,note?}], errors, at}` (du -sk; total de `~/.hermes` em chamada própria do du para não descontar inodes já contados).
+`storage:preview(kind)` → `{kind, candidates:[{path,kb,reason}], totalKb, rules}`; `storage:clean(kind)` → `{kind, removed, freedKb, errors}`. `kind ∈ logs | cache | worktrees`:
+- logs: `*.log.N` ou parados ≥14 dias; nunca modificados nas últimas 24h; `~/.hermes/logs` e `profiles/*/logs`.
+- cache: arquivos ≥3 dias em `cache/{audio,images,screenshots,videos,documents,spillover,terminal-output,web,vision,browser-use,exec,delegation}` e `audio_cache`/`image_cache` (raiz e profiles). Catálogos JSON do topo de `cache/` ficam.
+- worktrees: runs do swarm em status terminal, runner morto, sem run ativa no mesmo cwd, cwd dentro de `~/.hermes/cockpit/worktrees` → `git worktree remove --force` (branch preservada).
+Sessões e `state.db` nunca são tocados por aqui.

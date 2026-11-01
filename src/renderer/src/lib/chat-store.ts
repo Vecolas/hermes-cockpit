@@ -4,12 +4,14 @@
 
 import type { ApprovalRequest, GatewayEvent, InflightTurn, SessionLiveInfo, TranscriptMessage } from './gateway'
 
+/** `ts` = epoch em segundos (histórico: timestamp da mensagem; ao vivo: relógio local). */
 export type ChatItem =
-  | { kind: 'user'; id: string; text: string }
-  | { kind: 'assistant'; id: string; text: string; reasoning: string; streaming: boolean }
+  | { kind: 'user'; id: string; text: string; ts?: number }
+  | { kind: 'assistant'; id: string; text: string; reasoning: string; streaming: boolean; ts?: number }
   | {
       kind: 'tool'
       id: string
+      ts?: number
       name: string
       context: string
       args: Record<string, unknown> | null
@@ -17,9 +19,11 @@ export type ChatItem =
       summary: string
       result: string
       duration: number | null
+      /** epoch ms do tool.start ao vivo (cronômetro enquanto roda) */
+      startedMs?: number
     }
-  | { kind: 'note'; id: string; tone: 'info' | 'warn' | 'error'; text: string }
-  | { kind: 'slash'; id: string; command: string; output: string; warning: string }
+  | { kind: 'note'; id: string; tone: 'info' | 'warn' | 'error'; text: string; ts?: number }
+  | { kind: 'slash'; id: string; command: string; output: string; warning: string; ts?: number }
 
 /** Aprovação pendente. `rpcId` presente = veio por server request vivo (responde-se pela
  *  Promise do handler); ausente = restaurada por session.resume (responde-se via
@@ -37,9 +41,13 @@ export interface ChatState {
   status: string
   info: SessionLiveInfo | null
   usage: Record<string, unknown> | null
+  /** quantos itens vieram do histórico no último load — itens a partir daqui animam a entrada */
+  baseline: number
 }
 
-export const initialChat: ChatState = { items: [], running: false, status: '', info: null, usage: null }
+export const initialChat: ChatState = { items: [], running: false, status: '', info: null, usage: null, baseline: 0 }
+
+const now = () => Date.now() / 1000
 
 export type ChatAction =
   | { type: 'reset' }
@@ -61,15 +69,17 @@ function fromHistory(messages: TranscriptMessage[]): ChatItem[] {
   const items: ChatItem[] = []
   for (const m of messages) {
     const text = str(m.text)
+    const ts = typeof m.timestamp === 'number' && m.timestamp > 0 ? m.timestamp : undefined
     if (m.role === 'user') {
-      if (text) items.push({ kind: 'user', id: nid('u'), text })
+      if (text) items.push({ kind: 'user', id: nid('u'), text, ts })
     } else if (m.role === 'assistant') {
       if (text || m.reasoning)
-        items.push({ kind: 'assistant', id: nid('a'), text, reasoning: str(m.reasoning), streaming: false })
+        items.push({ kind: 'assistant', id: nid('a'), text, reasoning: str(m.reasoning), streaming: false, ts })
     } else if (m.role === 'tool') {
       items.push({
         kind: 'tool',
         id: nid('t'),
+        ts,
         name: str(m.name) || 'tool',
         context: str(m.context),
         args: m.args ?? null,
@@ -79,7 +89,7 @@ function fromHistory(messages: TranscriptMessage[]): ChatItem[] {
         duration: null,
       })
     } else if (text) {
-      items.push({ kind: 'note', id: nid('n'), tone: 'info', text })
+      items.push({ kind: 'note', id: nid('n'), tone: 'info', text, ts })
     }
   }
   return items
@@ -112,6 +122,7 @@ function appendAssistant(items: ChatItem[], field: 'text' | 'reasoning', chunk: 
       text: field === 'text' ? chunk : '',
       reasoning: field === 'reasoning' ? chunk : '',
       streaming: true,
+      ts: now(),
     })
   } else {
     const it = next[i] as Extract<ChatItem, { kind: 'assistant' }>
@@ -138,7 +149,7 @@ function onEvent(state: ChatState, e: GatewayEvent): ChatState {
       const items = sealOpen(state.items)
       const text = str(p.text)
       return text
-        ? { ...state, items: [...items, { kind: 'assistant', id: nid('a'), text, reasoning: '', streaming: false }] }
+        ? { ...state, items: [...items, { kind: 'assistant', id: nid('a'), text, reasoning: '', streaming: false, ts: now() }] }
         : state
     }
     case 'tool.generating':
@@ -155,6 +166,8 @@ function onEvent(state: ChatState, e: GatewayEvent): ChatState {
         summary: '',
         result: '',
         duration: null,
+        ts: now(),
+        startedMs: Date.now(),
       })
       return { ...state, running: true, status: '', items }
     }
@@ -183,15 +196,15 @@ function onEvent(state: ChatState, e: GatewayEvent): ChatState {
         items = items.slice()
         items[i] = { ...it, text: it.text || finalText, reasoning: it.reasoning || str(p.reasoning), streaming: false }
       } else if (finalText && !lastAssistantHas(items, finalText)) {
-        items = [...items, { kind: 'assistant', id: nid('a'), text: finalText, reasoning: str(p.reasoning), streaming: false }]
+        items = [...items, { kind: 'assistant', id: nid('a'), text: finalText, reasoning: str(p.reasoning), streaming: false, ts: now() }]
       }
       items = sealOpen(items)
       if (p.status === 'error') {
-        items = [...items, { kind: 'note', id: nid('n'), tone: 'error', text: str(p.error) || str(p.failure_reason) || 'o turno terminou com erro' }]
+        items = [...items, { kind: 'note', id: nid('n'), tone: 'error', text: str(p.error) || str(p.failure_reason) || 'o turno terminou com erro', ts: now() }]
       } else if (p.status === 'interrupted') {
-        items = [...items, { kind: 'note', id: nid('n'), tone: 'warn', text: 'turno interrompido' }]
+        items = [...items, { kind: 'note', id: nid('n'), tone: 'warn', text: 'turno interrompido', ts: now() }]
       }
-      if (p.warning) items = [...items, { kind: 'note', id: nid('n'), tone: 'warn', text: str(p.warning) }]
+      if (p.warning) items = [...items, { kind: 'note', id: nid('n'), tone: 'warn', text: str(p.warning), ts: now() }]
       return {
         ...state,
         items,
@@ -207,9 +220,13 @@ function onEvent(state: ChatState, e: GatewayEvent): ChatState {
     case 'session.info':
       return { ...state, info: { ...(state.info ?? {}), ...(p as SessionLiveInfo) } }
     case 'error':
-      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: 'error', text: str(p.message) || 'erro do backend' }] }
+      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: 'error', text: str(p.message) || 'erro do backend', ts: now() }] }
     case 'notice':
-      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: 'info', text: str(p.message) }] }
+      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: 'info', text: str(p.message), ts: now() }] }
+    case 'session.title': {
+      const t = str(p.title)
+      return t ? { ...state, info: { ...(state.info ?? {}), title: t } } : state
+    }
     default:
       return state
   }
@@ -233,19 +250,22 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
       const inf = action.inflight
       if (action.running && inf) {
         // turno em andamento ao abrir: reconstrói as bolhas do turno vivo
-        if (inf.user && !(items.at(-1)?.kind === 'user')) items.push({ kind: 'user', id: nid('u'), text: inf.user })
-        if (inf.assistant) items.push({ kind: 'assistant', id: nid('a'), text: inf.assistant, reasoning: '', streaming: true })
+        if (inf.user && !(items.at(-1)?.kind === 'user')) items.push({ kind: 'user', id: nid('u'), text: inf.user, ts: now() })
+        if (inf.assistant) items.push({ kind: 'assistant', id: nid('a'), text: inf.assistant, reasoning: '', streaming: true, ts: now() })
       }
-      return { ...initialChat, items, running: action.running, info: action.info }
+      return { ...initialChat, items, running: action.running, info: action.info, baseline: items.length }
     }
     case 'user':
-      return { ...state, items: [...sealOpen(state.items), { kind: 'user', id: nid('u'), text: action.text }] }
+      return { ...state, items: [...sealOpen(state.items), { kind: 'user', id: nid('u'), text: action.text, ts: now() }] }
     case 'note':
-      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: action.tone, text: action.text }] }
+      return { ...state, items: [...state.items, { kind: 'note', id: nid('n'), tone: action.tone, text: action.text, ts: now() }] }
     case 'slash':
       return {
         ...state,
-        items: [...state.items, { kind: 'slash', id: nid('s'), command: action.command, output: action.output, warning: action.warning }],
+        items: [
+          ...state.items,
+          { kind: 'slash', id: nid('s'), command: action.command, output: action.output, warning: action.warning, ts: now() },
+        ],
       }
     case 'running':
       return { ...state, running: action.running, status: action.running ? state.status : '' }

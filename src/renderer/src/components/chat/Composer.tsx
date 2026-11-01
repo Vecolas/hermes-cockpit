@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { SlashCommand } from '../../lib/gateway'
+import { useDictation } from '../transcriber/useDictation'
 
 interface Props {
   title: string
@@ -37,6 +38,41 @@ export function Composer({
   const [dismissed, setDismissed] = useState(false)
   const [sending, setSending] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
+
+  // ── ditado (contrato fixo de useDictation; oculto se available=false) ─────
+  const dictation = useDictation()
+  const [partial, setPartial] = useState('')
+  const listening = dictation.state === 'listening' || dictation.state === 'starting'
+  const stopRef = useRef(dictation.stop)
+  stopRef.current = dictation.stop
+  const toggleDictation = () => {
+    if (listening) {
+      dictation.stop()
+      setPartial('')
+      return
+    }
+    setPartial('')
+    dictation.start((chunk, final) => {
+      if (!final) {
+        setPartial(chunk)
+        return
+      }
+      setPartial('')
+      const add = chunk.trim()
+      if (add) setText((t) => (t && !/\s$/.test(t) ? `${t} ${add}` : `${t}${add}`))
+    })
+    ta.current?.focus()
+  }
+  // painel desabilitado (troca de sessão/desconexão) encerra o ditado
+  useEffect(() => {
+    if (disabled && listening) {
+      stopRef.current()
+      setPartial('')
+    }
+  }, [disabled, listening])
+  useEffect(() => {
+    if (!listening) setPartial('')
+  }, [listening])
 
   useEffect(() => {
     if (!prefill) return
@@ -76,6 +112,7 @@ export function Composer({
   const send = async () => {
     const value = text.trim()
     if (!value || disabled || sending) return
+    if (listening) dictation.stop()
     setSending(true)
     try {
       const ok = await onSend(value)
@@ -154,6 +191,16 @@ export function Composer({
           placeholder={disabled ? (disabledReason ?? 'indisponível') : `Fala com o ${title}...`}
           className="block w-full resize-none bg-transparent leading-relaxed text-ink placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
         />
+        {listening && (
+          <div className="hc-fade-in mt-0.5 flex min-h-[1.4em] items-baseline gap-2 text-dim">
+            <span className="hc-pulse-dot inline-block h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full bg-alert" />
+            {partial ? (
+              <span className="italic text-dim">{partial}</span>
+            ) : (
+              <span className="italic text-faint">{dictation.state === 'starting' ? 'abrindo o microfone…' : 'ouvindo…'}</span>
+            )}
+          </div>
+        )}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <button
             disabled
@@ -177,7 +224,31 @@ export function Composer({
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
-            {footerRight && <span className="text-[11px] text-faint">{footerRight}</span>}
+            {footerRight && <span className="truncate text-[11px] text-faint">{footerRight}</span>}
+            {dictation.available && (
+              <button
+                onClick={toggleDictation}
+                disabled={disabled && !listening}
+                title={
+                  dictation.state === 'error'
+                    ? `ditado com erro: ${dictation.error ?? 'desconhecido'} — clique para tentar de novo`
+                    : listening
+                      ? 'parar ditado'
+                      : 'ditar (transcriber)'
+                }
+                aria-pressed={listening}
+                className={`relative flex h-[22px] w-[26px] items-center justify-center rounded border text-[12px] transition-colors disabled:opacity-40 ${
+                  listening
+                    ? 'border-alert/70 bg-alert/15 text-alert'
+                    : dictation.state === 'error'
+                      ? 'border-alert/40 text-alert/80 hover:border-alert'
+                      : 'border-edge text-dim hover:border-amber/50 hover:text-ink'
+                }`}
+              >
+                {listening && <span className="hc-pulse-dot absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-alert" />}
+                <MicGlyph />
+              </button>
+            )}
             {running ? (
               <button
                 onClick={onCancel}
@@ -200,5 +271,14 @@ export function Composer({
       </div>
       {footerLeft && <div className="mt-1.5 px-1 text-[10.5px] text-faint">{footerLeft}</div>}
     </div>
+  )
+}
+
+function MicGlyph() {
+  return (
+    <svg width="11" height="13" viewBox="0 0 11 13" fill="none" aria-hidden>
+      <rect x="3" y="0.75" width="5" height="7.5" rx="2.5" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M1 6.25a4.5 4.5 0 0 0 9 0M5.5 10.75v1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
   )
 }

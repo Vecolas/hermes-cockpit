@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { BOT_TITLES, type BotProfile } from '../lib/bots'
 import { chatReducer, initialChat, type PendingApproval } from '../lib/chat-store'
+import { api } from '../lib/ipc'
+import { toast } from '../lib/toast'
 import {
+  closeSession,
   commandDispatch,
   commandsCatalog,
   createSideChat,
@@ -11,6 +14,7 @@ import {
   interruptTurn,
   listSessions,
   parseGatewayEvent,
+  renameSession,
   resolveBotChat,
   respondApproval,
   resumeSession,
@@ -25,9 +29,10 @@ import {
 } from '../lib/gateway'
 import { RpcError, type ConnState, type HermesRpc } from '../lib/rpc'
 import { ApprovalCard } from './chat/ApprovalCard'
+import { CANONICAL_KEY, ChatTabs, sideKey, type ChatTab } from './chat/ChatTabs'
 import { Composer } from './chat/Composer'
 import { ModelPicker } from './chat/ModelPicker'
-import { SessionMenu, type SessionTarget } from './chat/SessionMenu'
+import { SessionDrawer } from './chat/SessionDrawer'
 import { Transcript } from './chat/Transcript'
 
 interface Props {
@@ -47,6 +52,33 @@ interface OpenSession {
 type Load = { phase: 'idle' } | { phase: 'loading' } | { phase: 'ready' } | { phase: 'error'; message: string }
 
 const VERBOSE_KEY = 'hermes-cockpit.chat.verbose'
+/** Por bot: SÓ os ids armazenados das abas de side-chat abertas, na ordem da faixa.
+ *  O Bot Chat nunca entra aqui (regra Bot Mode: identidade = título, resolvida a cada
+ *  abertura). Side-chats "fresh" (sem linha no DB) só entram após o 1º prompt. */
+const TABS_KEY = (profile: string) => `hermes-cockpit.chat.tabs.${profile}`
+
+function readTabIds(profile: string): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TABS_KEY(profile)) ?? '[]') as unknown
+    return Array.isArray(raw) ? raw.filter((x): x is string => typeof x === 'string' && x.length > 0).slice(0, 24) : []
+  } catch {
+    return []
+  }
+}
+
+function writeTabIds(profile: string, ids: string[]): void {
+  try {
+    localStorage.setItem(TABS_KEY(profile), JSON.stringify(ids))
+  } catch {
+    /* preferência local opcional */
+  }
+}
+
+const CANONICAL_TAB: ChatTab = { key: CANONICAL_KEY, kind: 'canonical', title: 'Bot Chat' }
+
+function shortTitle(row: SessionRow | undefined, fallback: string): string {
+  return row?.title?.trim() || row?.preview?.trim().slice(0, 40) || fallback
+}
 
 function readVerbose(): boolean {
   try {
@@ -70,7 +102,8 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   const online = Boolean(rpc) && connState === 'open'
 
   const [chat, dispatch] = useReducer(chatReducer, initialChat)
-  const [target, setTarget] = useState<SessionTarget>({ kind: 'canonical' })
+  const [sideTabs, setSideTabs] = useState<ChatTab[]>([])
+  const [activeKey, setActiveKey] = useState<string>(CANONICAL_KEY)
   const [session, setSession] = useState<OpenSession | null>(null)
   const [load, setLoad] = useState<Load>({ phase: 'idle' })
   const [reloadNonce, setReloadNonce] = useState(0)
@@ -82,7 +115,21 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   const [sideError, setSideError] = useState<string | null>(null)
   const [verbose, setVerbose] = useState(readVerbose)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerNonce, setDrawerNonce] = useState(0)
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null)
+  /** troca "este chat" bem-sucedida: o chip mostra o modelo da sessão até trocar de aba */
+  const [sessionModel, setSessionModel] = useState<{ key: string; model: string; provider: string } | null>(null)
+  /** keys de abas com turno em andamento (eventos de qualquer sessão que abrimos) */
+  const [streaming, setStreaming] = useState<Set<string>>(() => new Set())
+  /** runtimeId ↔ tab key de toda sessão que este painel resumiu (abas em 2º plano) */
+  const runtimeByKey = useRef(new Map<string, string>())
+  /** profile dono de `sideTabs` — enquanto difere de `profile`, nada abre (troca de bot) */
+  const [tabsFor, setTabsFor] = useState<string | null>(null)
+
+  const tabs = useMemo(() => [CANONICAL_TAB, ...sideTabs], [sideTabs])
+  const activeTab = tabs.find((t) => t.key === activeKey) ?? CANONICAL_TAB
+  const target = activeTab
 
   const activeSid = useRef<string | null>(null)
   activeSid.current = session?.runtimeId ?? null
@@ -96,12 +143,55 @@ export function ChatPane({ rpc, bot, connState }: Props) {
 
   // ── troca de bot: volta para o Bot Chat canônico ──────────────────────────
   useEffect(() => {
-    setTarget({ kind: 'canonical' })
+    setActiveKey(CANONICAL_KEY)
     setPickerOpen(false)
+    setDrawerOpen(false)
     setModel(null)
     setModelError(null)
+    setSessionModel(null)
+    setStreaming(new Set())
+    runtimeByKey.current.clear()
     freshSide.current = null
+    setTabsFor(profile)
+    // abas persistidas: só ids; títulos chegam com a lista de side-chats
+    setSideTabs(profile ? readTabIds(profile).map((id) => ({ key: sideKey(id), kind: 'side' as const, storedId: id, title: 'side-chat' })) : [])
   }, [profile])
+
+  // persiste a ordem/conjunto de abas (sem as fresh e nunca o Bot Chat)
+  useEffect(() => {
+    if (!profile || tabsFor !== profile) return
+    writeTabIds(
+      profile,
+      sideTabs.filter((t) => t.kind === 'side' && t.storedId && !t.fresh).map((t) => t.storedId as string),
+    )
+  }, [sideTabs, profile, tabsFor])
+
+  // títulos das abas a partir da lista de side-chats do profile
+  useEffect(() => {
+    if (!sideChats.length) return
+    const byId = new Map(sideChats.map((r) => [r.id, r]))
+    setSideTabs((prev) => {
+      let changed = false
+      const next = prev.map((t) => {
+        const row = t.storedId ? byId.get(t.storedId) : undefined
+        if (!row) return t
+        const title = shortTitle(row, t.title)
+        if (title === t.title && !t.fresh) return t
+        changed = true
+        return { ...t, title, fresh: false }
+      })
+      return changed ? next : prev
+    })
+  }, [sideChats])
+
+  useEffect(() => setSessionModel(null), [activeKey])
+
+  // título vindo da própria sessão (resume/session.info) — cobre abas ocultas/fora da lista
+  const infoTitle = typeof chat.info?.title === 'string' ? chat.info.title.trim() : ''
+  useEffect(() => {
+    if (!infoTitle || activeKey === CANONICAL_KEY || infoTitle === 'Bot Chat') return
+    setSideTabs((prev) => prev.map((t) => (t.key === activeKey && t.title !== infoTitle ? { ...t, title: infoTitle } : t)))
+  }, [infoTitle, activeKey])
 
   useEffect(() => {
     try {
@@ -220,7 +310,7 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   // ── side-chats ─────────────────────────────────────────────────────────────
   const refreshSides = useCallback(() => {
     if (!rpc || !profile || !online) return
-    listSessions(rpc, profile)
+    listSessions(rpc, profile, 100)
       .then((rows) => {
         setSideChats(rows)
         setSideError(null)
@@ -246,8 +336,39 @@ export function ChatPane({ rpc, bot, connState }: Props) {
       }
       if (ev.type === 'sessions.changed') {
         if (sidesTimer.current) clearTimeout(sidesTimer.current)
-        sidesTimer.current = setTimeout(refreshSides, 800)
+        sidesTimer.current = setTimeout(() => {
+          refreshSides()
+          setDrawerNonce((n) => n + 1)
+        }, 800)
         return
+      }
+      // indicador de streaming por aba (inclusive abas em 2º plano)
+      if (ev.session_id && (ev.type === 'message.start' || ev.type === 'message.complete')) {
+        const sid = ev.session_id
+        let key: string | null = null
+        for (const [k, rid] of runtimeByKey.current) if (rid === sid) key = k
+        if (key) {
+          const k = key
+          setStreaming((prev) => {
+            const on = ev.type === 'message.start'
+            if (prev.has(k) === on) return prev
+            const next = new Set(prev)
+            if (on) next.add(k)
+            else next.delete(k)
+            return next
+          })
+        }
+      }
+      // auto-titler: atualiza o título da aba do side-chat (nunca do Bot Chat)
+      if (ev.type === 'session.title' && ev.session_id) {
+        const title = typeof ev.payload?.title === 'string' ? ev.payload.title.trim() : ''
+        const sid = ev.session_id
+        let key: string | null = null
+        for (const [k, rid] of runtimeByKey.current) if (rid === sid) key = k
+        if (title && key && key !== CANONICAL_KEY) {
+          const k = key
+          setSideTabs((prev) => prev.map((t) => (t.key === k ? { ...t, title, fresh: false } : t)))
+        }
       }
       if (ev.session_id && ev.session_id === activeSid.current) dispatch({ type: 'event', event: ev })
     })
@@ -258,10 +379,10 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   }, [rpc, reconcileApprovals, refreshSides])
 
   // ── abrir sessão (Bot Chat canônico ou side-chat) ─────────────────────────
-  const targetKey = target.kind === 'canonical' ? 'canonical' : `side:${target.storedId}`
+  const targetKey = activeTab.key
   useEffect(() => {
-    // troca de bot com side-chat aberto: espera o reset para o Bot Chat do novo profile
-    if (target.kind === 'side' && target.profile && target.profile !== profile) return
+    // troca de bot: espera o reset das abas para o novo profile
+    if (tabsFor !== profile) return
     const token = ++loadToken.current
     setSession(null)
     dispatch({ type: 'reset' })
@@ -302,7 +423,7 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           const row = await resolveBotChat(rpc, profile, { hadCanonical: pm.hasCanonical })
           storedId = row.resolved_id || row.id
         } else {
-          storedId = target.storedId
+          storedId = target.storedId as string
         }
         if (stale()) return
         resumed = await resumeSession(rpc, storedId, profile)
@@ -312,6 +433,7 @@ export function ChatPane({ rpc, bot, connState }: Props) {
 
       setSession(open)
       activeSid.current = open.runtimeId
+      runtimeByKey.current.set(targetKey, open.runtimeId)
       if (resumed) {
         dispatch({
           type: 'load',
@@ -319,6 +441,14 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           info: resumed.info ?? null,
           running: Boolean(resumed.running),
           inflight: resumed.inflight ?? null,
+        })
+        setStreaming((prev) => {
+          const on = Boolean(resumed?.running)
+          if (prev.has(targetKey) === on) return prev
+          const next = new Set(prev)
+          if (on) next.add(targetKey)
+          else next.delete(targetKey)
+          return next
         })
         // aprovações que já estavam pendentes (reconexão / turno em andamento)
         if (resumed.pending_approval?.request_id) {
@@ -347,10 +477,12 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     })
     // target é coberto por targetKey
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rpc, profile, online, targetKey, reloadNonce, addApproval])
+  }, [rpc, profile, online, targetKey, reloadNonce, addApproval, tabsFor])
 
   // ── ações ──────────────────────────────────────────────────────────────────
   const sid = session?.runtimeId ?? null
+  const activeKeyRef = useRef(activeKey)
+  activeKeyRef.current = activeKey
 
   const sendPrompt = useCallback(
     async (text: string, display?: string): Promise<boolean> => {
@@ -359,6 +491,8 @@ export function ChatPane({ rpc, bot, connState }: Props) {
       dispatch({ type: 'running', running: true })
       try {
         const res = await submitPrompt(rpc, sid, text)
+        // 1º prompt materializa a linha do side-chat: a aba passa a ser persistida
+        setSideTabs((prev) => (prev.some((t) => t.key === activeKeyRef.current && t.fresh) ? prev.map((t) => (t.key === activeKeyRef.current ? { ...t, fresh: false } : t)) : prev))
         if (res?.status === 'queued') dispatch({ type: 'note', tone: 'info', text: 'na fila — entra quando o turno atual terminar' })
         else if (res?.status === 'steered') dispatch({ type: 'note', tone: 'info', text: 'enviado como ajuste ao turno em andamento' })
         else if (res?.status === 'redirected') dispatch({ type: 'note', tone: 'info', text: 'turno redirecionado' })
@@ -436,11 +570,103 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     try {
       const created = await createSideChat(rpc, profile)
       freshSide.current = { storedId: created.stored_session_id, runtimeId: created.session_id, info: created.info }
-      setTarget({ kind: 'side', storedId: created.stored_session_id, title: 'novo side-chat', profile })
+      const key = sideKey(created.stored_session_id)
+      runtimeByKey.current.set(key, created.session_id)
+      setSideTabs((prev) => [...prev, { key, kind: 'side', storedId: created.stored_session_id, title: 'novo side-chat', fresh: true }])
+      setActiveKey(key)
     } catch (e) {
-      dispatch({ type: 'note', tone: 'error', text: `não foi possível criar side-chat: ${errText(e)}` })
+      toast({ title: 'Não foi possível criar side-chat', detail: errText(e), tone: 'error' })
     }
   }, [rpc, profile])
+
+  /** Abre (ou foca) um side-chat como aba. */
+  const openSide = useCallback((row: { id: string; title: string }) => {
+    const key = sideKey(row.id)
+    setSideTabs((prev) => (prev.some((t) => t.key === key) ? prev : [...prev, { key, kind: 'side', storedId: row.id, title: row.title || 'side-chat' }]))
+    setActiveKey(key)
+  }, [])
+
+  // Intents da paleta ⌘K (App dispara depois de trocar a view para chat).
+  // Só agem se o profile do evento é o bot aberto aqui — nunca abrem sessão de outro bot.
+  useEffect(() => {
+    const detailOf = (e: Event) => ((e as CustomEvent<unknown>).detail ?? {}) as Record<string, unknown>
+    const onNew = (e: Event) => {
+      const d = detailOf(e)
+      if (d.profile && d.profile !== profile) return
+      void onNewSide()
+    }
+    const onOpen = (e: Event) => {
+      const d = detailOf(e)
+      if (d.profile !== profile || typeof d.id !== 'string' || !d.id) return
+      openSide({ id: d.id, title: typeof d.title === 'string' ? d.title : 'side-chat' })
+    }
+    const onInsert = (e: Event) => {
+      const d = detailOf(e)
+      if (typeof d.text === 'string' && d.text) setPrefill({ text: d.text, nonce: Date.now() })
+    }
+    window.addEventListener('hc:chat-new-side', onNew)
+    window.addEventListener('hc:chat-open-session', onOpen)
+    window.addEventListener('hc:chat-insert', onInsert)
+    return () => {
+      window.removeEventListener('hc:chat-new-side', onNew)
+      window.removeEventListener('hc:chat-open-session', onOpen)
+      window.removeEventListener('hc:chat-insert', onInsert)
+    }
+  }, [profile, onNewSide, openSide])
+
+  const closeTab = useCallback(
+    (key: string) => {
+      if (key === CANONICAL_KEY) return
+      setSideTabs((prev) => {
+        const i = prev.findIndex((t) => t.key === key)
+        if (i < 0) return prev
+        const next = prev.filter((t) => t.key !== key)
+        if (activeKeyRef.current === key) setActiveKey(next[Math.min(i, next.length - 1)]?.key ?? CANONICAL_KEY)
+        return next
+      })
+      // libera o runtime se não houver turno rodando (o registro fica intacto)
+      const rid = runtimeByKey.current.get(key)
+      runtimeByKey.current.delete(key)
+      if (rid && rpc && !streaming.has(key)) void closeSession(rpc, rid, profile ?? undefined).catch(() => {})
+      if (freshSide.current && sideKey(freshSide.current.storedId) === key) freshSide.current = null
+    },
+    [rpc, profile, streaming],
+  )
+
+  const renameTab = useCallback(
+    async (key: string, title: string) => {
+      const tab = sideTabs.find((t) => t.key === key)
+      if (!tab?.storedId || !profile) return
+      const rid = runtimeByKey.current.get(key) ?? null
+      try {
+        let final: string
+        try {
+          final = await renameSession(rpc, api, { profile, storedId: tab.storedId, runtimeId: rid, title })
+        } catch (e) {
+          if (!rid) throw e
+          final = await renameSession(null, api, { profile, storedId: tab.storedId, title })
+        }
+        setSideTabs((prev) => prev.map((t) => (t.key === key ? { ...t, title: final, fresh: false } : t)))
+        setDrawerNonce((n) => n + 1)
+      } catch (e) {
+        toast({ title: 'Renomear falhou', detail: errText(e), tone: 'error' })
+        throw e
+      }
+    },
+    [rpc, profile, sideTabs],
+  )
+
+  const reorderTabs = useCallback((from: string, to: string) => {
+    setSideTabs((prev) => {
+      const a = prev.findIndex((t) => t.key === from)
+      const b = prev.findIndex((t) => t.key === to)
+      if (a < 0 || b < 0) return prev
+      const next = prev.slice()
+      const [moved] = next.splice(a, 1)
+      next.splice(b, 0, moved)
+      return next
+    })
+  }, [])
 
   // ── derivados de exibição ─────────────────────────────────────────────────
   const quick = useMemo(
@@ -452,7 +678,8 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     [commands],
   )
 
-  const modelName = model?.model ?? bot?.modelo ?? null
+  const liveModel = sessionModel && sessionModel.key === activeKey ? sessionModel : null
+  const modelName = liveModel?.model ?? model?.model ?? bot?.modelo ?? null
   const fallbackName = model?.fallback[0]?.model ?? null
   const approvalMode = typeof chat.info?.approval_mode === 'string' ? chat.info.approval_mode : null
   const usage = chat.usage
@@ -471,53 +698,119 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           ? 'sessão indisponível'
           : undefined
 
+  const openIds = useMemo(() => new Set(sideTabs.map((t) => t.storedId).filter((x): x is string => Boolean(x))), [sideTabs])
+  const monogram = title.trim().charAt(0).toUpperCase() || '·'
+
   return (
     <section className="relative flex h-full min-h-0 w-full flex-col bg-void scanlines">
-      {/* header */}
-      <div className="relative z-20 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-edge px-5 py-2.5">
-        <span className="font-display min-w-0 truncate text-base text-ink">{title}</span>
-        <div className="relative min-w-0 max-w-[320px] shrink">
+      {/* header compacto */}
+      <div className="relative z-20 flex min-w-0 items-center gap-2.5 border-b border-edge px-4 py-1.5">
+        <span
+          className={`flex h-6 w-6 shrink-0 select-none items-center justify-center rounded-md border bg-panel text-[11px] font-semibold ${
+            chat.running ? 'border-amber/60 text-amber hc-glow-amber' : 'border-edge2 text-dim'
+          }`}
+        >
+          {monogram}
+        </span>
+        <span className="font-display min-w-0 shrink truncate text-[15px] text-ink">{title}</span>
+        <div className="relative min-w-0 shrink">
           <button
+            data-model-chip
             disabled={!profile || !online}
             onClick={() => setPickerOpen((v) => !v)}
             title={modelError ?? 'trocar modelo'}
-            className="block max-w-full truncate rounded border border-edge px-2 py-0.5 text-[11px] text-dim hover:border-amber/50 hover:text-ink disabled:opacity-50"
+            className={`flex max-w-[340px] items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+              pickerOpen ? 'border-amber/60 text-ink' : 'border-edge text-dim hover:border-amber/50 hover:text-ink'
+            }`}
           >
-            modelo: {modelName ?? (modelError ? 'erro' : '—')}
-            {fallbackName && <span className="text-faint"> · fallback {fallbackName}</span>}
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber/80" />
+            <span className="truncate">{modelName ?? (modelError ? 'erro' : '—')}</span>
+            {liveModel && <span className="shrink-0 text-[10px] text-cyanic">este chat</span>}
+            {fallbackName && <span className="hidden truncate text-faint sm:inline">· fb {fallbackName}</span>}
+            <span className="shrink-0 text-faint">▾</span>
           </button>
           {pickerOpen && rpc && profile && (
             <ModelPicker
               rpc={rpc}
               profile={profile}
+              botTitle={title}
               sessionId={sid}
+              isBotChat={activeTab.kind === 'canonical'}
               currentModel={modelName}
-              currentProvider={model?.provider ?? null}
+              currentProvider={liveModel?.provider ?? model?.provider ?? null}
+              fallback={model?.fallback ?? []}
               onClose={() => setPickerOpen(false)}
-              onSwitched={(note) => {
-                dispatch({ type: 'note', tone: 'info', text: note })
+              onSwitched={(r) => {
+                dispatch({ type: 'note', tone: 'info', text: r.note })
+                if (r.scope === 'chat') setSessionModel({ key: activeKey, model: r.model, provider: r.provider })
+                else setSessionModel(null)
                 if (rpc && profile) getProfileModel(rpc, profile).then(setModel).catch(() => {})
               }}
             />
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-3">
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-dim">
+        <div className="ml-auto flex shrink-0 items-center gap-2.5">
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-dim" title="mostrar raciocínio e resumos de ferramentas">
             <input type="checkbox" checked={verbose} onChange={(e) => setVerbose(e.target.checked)} className="accent-amber" />
             verbose
           </label>
-          <SessionMenu
-            active={target}
-            sideChats={sideChats}
-            sideError={sideError}
+          <button
             disabled={!profile || !online}
-            onPick={(t) => setTarget(t.kind === 'side' ? { ...t, profile: profile ?? undefined } : t)}
-            onNew={() => void onNewSide()}
-            onRefresh={refreshSides}
-          />
+            onClick={() => {
+              if (!drawerOpen) refreshSides()
+              setDrawerOpen((v) => !v)
+            }}
+            title={sideError ?? 'sessões do bot'}
+            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+              drawerOpen ? 'border-amber/60 text-amber' : sideError ? 'border-alert/40 text-alert' : 'border-edge text-dim hover:border-amber/50 hover:text-ink'
+            }`}
+          >
+            ☰ sessões
+            {sideChats.length > 0 && <span className="text-[10px] text-faint">{sideChats.length}</span>}
+          </button>
           <ConnBadge state={connState} />
         </div>
       </div>
+
+      {profile && online && (
+        <ChatTabs
+          tabs={tabs}
+          activeKey={activeKey}
+          streaming={streaming}
+          disabled={!online}
+          onSelect={setActiveKey}
+          onClose={closeTab}
+          onRename={renameTab}
+          onReorder={reorderTabs}
+          onNew={() => void onNewSide()}
+        />
+      )}
+
+      {drawerOpen && rpc && profile && online && (
+        <div className="absolute inset-x-0 bottom-0 top-[37px] z-30">
+          <div className="absolute inset-0 bg-void/40" onClick={() => setDrawerOpen(false)} />
+          <SessionDrawer
+            rpc={rpc}
+            profile={profile}
+            botTitle={title}
+            openIds={openIds}
+            activeId={activeTab.kind === 'side' ? (activeTab.storedId ?? null) : null}
+            runtimeOf={(id) => {
+              const k = sideKey(id)
+              const rid = runtimeByKey.current.get(k)
+              return rid ? { runtimeId: rid, running: streaming.has(k) } : null
+            }}
+            refreshNonce={drawerNonce}
+            onOpen={(row) => {
+              openSide(row)
+              setDrawerOpen(false)
+            }}
+            onRenamed={(id, t) => setSideTabs((prev) => prev.map((x) => (x.storedId === id ? { ...x, title: t } : x)))}
+            onDeleted={() => refreshSides()}
+            onClose={() => setDrawerOpen(false)}
+          />
+        </div>
+      )}
 
       {/* corpo */}
       {!rpc || connState !== 'open' ? (
@@ -538,12 +831,22 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           <div className="max-w-md rounded-lg border border-alert/40 bg-panel p-4 text-left">
             <div className="label mb-1 text-alert">Falha ao abrir o chat</div>
             <pre className="whitespace-pre-wrap text-[12px] text-dim">{load.message}</pre>
-            <button
-              onClick={() => setReloadNonce((n) => n + 1)}
-              className="mt-3 rounded border border-edge2 px-3 py-1 text-[12px] text-ink hover:border-amber/60"
-            >
-              tentar de novo
-            </button>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => setReloadNonce((n) => n + 1)}
+                className="rounded border border-edge2 px-3 py-1 text-[12px] text-ink hover:border-amber/60"
+              >
+                tentar de novo
+              </button>
+              {activeTab.kind === 'side' && (
+                <button
+                  onClick={() => closeTab(activeTab.key)}
+                  className="rounded border border-edge px-3 py-1 text-[12px] text-dim hover:border-alert/60 hover:text-alert"
+                >
+                  fechar aba
+                </button>
+              )}
+            </div>
           </div>
         </Centered>
       ) : (
@@ -552,10 +855,12 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           verbose={verbose}
           running={chat.running}
           status={chat.status}
+          botName={title}
+          baseline={chat.baseline}
           empty={
             load.phase === 'loading' ? (
               <div className="py-10 text-center text-dim">
-                abrindo {target.kind === 'canonical' ? 'Bot Chat' : 'side-chat'} de {title}…
+                abrindo {target.kind === 'canonical' ? 'Bot Chat' : `“${target.title}”`} de {title}…
               </div>
             ) : (
               <div className="py-10 text-center text-faint">
@@ -593,7 +898,7 @@ export function ChatPane({ rpc, bot, connState }: Props) {
         footerRight={[approvalMode ? `aprovação: ${approvalMode}` : null, modelName].filter(Boolean).join(' · ') || undefined}
         footerLeft={
           [
-            target.kind === 'canonical' ? 'Bot Chat' : 'side-chat',
+            target.kind === 'canonical' ? 'Bot Chat' : `side-chat · ${target.title}`,
             ctxPct !== null ? `contexto ${ctxPct}%` : null,
             totalTok !== null ? `${totalTok.toLocaleString('pt-BR')} tokens` : null,
           ]

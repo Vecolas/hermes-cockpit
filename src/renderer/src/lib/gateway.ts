@@ -134,13 +134,31 @@ export interface SlashExecResult {
   status?: string | null
 }
 
+export interface ModelPricing {
+  input?: string
+  output?: string
+  cache?: string | null
+  free?: boolean
+  discount_percent?: number | null
+}
+
 export interface ModelOptionProvider {
   slug: string
   name: string
   models: string[]
+  total_models?: number | null
   is_current?: boolean | null
+  is_user_defined?: boolean | null
+  source?: string | null
+  api_url?: string | null
+  auth_type?: string | null
   authenticated?: boolean | null
   warning?: string | null
+  featured_models?: string[] | null
+  capabilities?: Record<string, { fast?: boolean; reasoning?: boolean; can_disable_reasoning?: boolean | null }> | null
+  pricing?: Record<string, ModelPricing> | null
+  free_tier?: boolean | null
+  unavailable_models?: string[] | null
   [k: string]: unknown
 }
 
@@ -398,10 +416,11 @@ export async function getProfileModel(rpc: HermesRpc, profile: string): Promise<
   }
 }
 
-export function modelOptions(rpc: HermesRpc, opts: { profile: string; sessionId?: string }): Promise<ModelOptions> {
+export function modelOptions(rpc: HermesRpc, opts: { profile: string; sessionId?: string; refresh?: boolean }): Promise<ModelOptions> {
   return rpc.call<ModelOptions>('model.options', {
     profile: opts.profile,
     ...(opts.sessionId ? { session_id: opts.sessionId } : {}),
+    ...(opts.refresh ? { refresh: true } : {}),
   })
 }
 
@@ -419,3 +438,161 @@ export function switchModel(
     ...(args.confirm ? { confirm_expensive_model: true } : {}),
   })
 }
+
+// ── gestão de sessões (gaveta, abas, armazenamento) ─────────────────────────
+//
+// Mistura RPC e REST de propósito, cada um onde o backend é dono do caso:
+// - session.title exige sessão VIVA (session_scoped) → usado para a aba aberta;
+//   fora disso, PATCH /api/sessions/{id} {title, profile}.
+// - session.set_hidden aceita id runtime ou armazenado.
+// - session.delete (RPC) recusa sessão viva (4023) — é a salvaguarda certa; o
+//   DELETE REST apagaria mesmo com o agente vivo. Usamos o RPC.
+// - busca e export só existem em REST.
+
+/** Linha rica de GET /api/sessions e /api/sessions/search (subconjunto). */
+export interface RestSessionRow {
+  id: string
+  session_id?: string
+  title?: string | null
+  preview?: string | null
+  snippet?: string | null
+  source?: string | null
+  model?: string | null
+  started_at?: number | null
+  ended_at?: number | null
+  last_active?: number | null
+  message_count?: number | null
+  tool_call_count?: number | null
+  input_tokens?: number | null
+  output_tokens?: number | null
+  archived?: boolean
+  pinned?: boolean
+  is_active?: boolean
+  profile?: string
+}
+
+export interface SessionStats {
+  total: number
+  active_store: number
+  archived: number
+  messages: number
+  by_source: Record<string, number>
+}
+
+export interface ModelInfo {
+  model: string
+  provider: string
+  auto_context_length: number
+  config_context_length: number
+  effective_context_length: number
+  capabilities: Record<string, unknown>
+}
+
+function qs(params: Record<string, string | number | boolean | null | undefined>): string {
+  const u = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== '') u.set(k, String(v))
+  const s = u.toString()
+  return s ? `?${s}` : ''
+}
+
+/** Lista de sessões com include_hidden opcional (o Bot Chat fica de fora sempre). */
+export async function listSessionsAll(
+  rpc: HermesRpc,
+  profile: string,
+  opts: { limit?: number; includeHidden?: boolean } = {},
+): Promise<SessionRow[]> {
+  const res = await rpc.call<{ sessions?: SessionRow[] }>('session.list', {
+    profile,
+    limit: opts.limit ?? 100,
+    ...(opts.includeHidden ? { include_hidden: true } : {}),
+  })
+  return (res?.sessions ?? []).filter((s) => !isCanonicalRow(s))
+}
+
+/** Busca FTS (id + conteúdo) — REST /api/sessions/search. */
+export async function searchSessions(api: ApiFn, profile: string, q: string, limit = 30): Promise<RestSessionRow[]> {
+  const res = await api<{ results?: RestSessionRow[] }>(`/api/sessions/search${qs({ q, limit, profile })}`)
+  return (res?.results ?? []).map((r) => ({ ...r, id: r.session_id || r.id }))
+}
+
+/** Renomeia: sessão viva → session.title (runtime); senão PATCH REST. Recusa "Bot Chat"
+ *  (é a identidade do chat eterno — um side-chat com esse título bifurcaria o canônico). */
+export async function renameSession(
+  rpc: HermesRpc | null,
+  api: ApiFn,
+  args: { profile: string; storedId: string; runtimeId?: string | null; title: string },
+): Promise<string> {
+  const title = args.title.trim()
+  if (!title) throw new Error('título vazio')
+  if (title.toLowerCase() === BOT_CHAT_TITLE.toLowerCase()) throw new Error(`"${BOT_CHAT_TITLE}" é reservado ao chat canônico`)
+  if (rpc && args.runtimeId) {
+    const res = await rpc.call<{ title?: string }>('session.title', {
+      session_id: args.runtimeId,
+      profile: args.profile,
+      title,
+    })
+    return res?.title || title
+  }
+  const res = await api<{ title?: string }>(`/api/sessions/${encodeURIComponent(args.storedId)}`, {
+    method: 'PATCH',
+    body: { title, profile: args.profile },
+  })
+  return res?.title || title
+}
+
+export function setSessionHidden(rpc: HermesRpc, profile: string, sessionId: string, hidden: boolean): Promise<{ hidden: boolean }> {
+  return rpc.call('session.set_hidden', { session_id: sessionId, hidden, profile })
+}
+
+/** Apaga sessão ARMAZENADA via RPC (recusa sessão viva com 4023). */
+export function deleteSessionRpc(rpc: HermesRpc, profile: string, storedId: string): Promise<{ deleted: string }> {
+  return rpc.call('session.delete', { session_id: storedId, profile })
+}
+
+/** Fecha a sessão runtime (não apaga nada do registro). */
+export function closeSession(rpc: HermesRpc, runtimeId: string, profile?: string): Promise<{ closed: boolean }> {
+  return rpc.call('session.close', { session_id: runtimeId, ...(profile ? { profile } : {}) })
+}
+
+/** Export (metadados + mensagens) — REST /api/sessions/{id}/export. */
+export function exportSession(api: ApiFn, profile: string, storedId: string): Promise<unknown> {
+  return api(`/api/sessions/${encodeURIComponent(storedId)}/export${qs({ profile })}`)
+}
+
+/** Contexto/capacidades do modelo configurado do profile — REST /api/model/info. */
+export function modelInfo(api: ApiFn, profile: string): Promise<ModelInfo> {
+  return api<ModelInfo>(`/api/model/info${qs({ profile })}`)
+}
+
+/** Grava o modelo principal no config.yaml DO PROFILE (não toca o profile do serve).
+ *  Vale para sessões novas — e para o Bot Chat no próximo resume (follow_profile_config). */
+export function setProfileDefaultModel(api: ApiFn, profile: string, provider: string, model: string): Promise<{ ok: boolean }> {
+  return api(`/api/profiles/${encodeURIComponent(profile)}/model`, { method: 'PUT', body: { provider, model } })
+}
+
+// REST de armazenamento (StoragePanel)
+export function sessionStats(api: ApiFn, profile?: string): Promise<SessionStats> {
+  return api<SessionStats>(`/api/sessions/stats${qs({ profile })}`)
+}
+export function emptySessionCount(api: ApiFn, profile?: string): Promise<{ count: number }> {
+  return api(`/api/sessions/empty/count${qs({ profile })}`)
+}
+export function deleteEmptySessions(api: ApiFn, profile?: string): Promise<{ ok: boolean; deleted: number }> {
+  return api(`/api/sessions/empty${qs({ profile })}`, { method: 'DELETE' })
+}
+/** GET /api/sessions (limit ≤ 100, paginado). Exclui ocultas (o Bot Chat é oculto). */
+export function restSessions(
+  api: ApiFn,
+  profile: string,
+  opts: { limit?: number; offset?: number; archived?: 'exclude' | 'only' | 'include'; order?: 'created' | 'recent' } = {},
+): Promise<{ sessions: RestSessionRow[]; total: number }> {
+  return api(
+    `/api/sessions${qs({ profile, limit: opts.limit ?? 100, offset: opts.offset ?? 0, archived: opts.archived ?? 'include', order: opts.order ?? 'recent' })}`,
+  )
+}
+export function bulkDeleteSessions(api: ApiFn, profile: string, ids: string[]): Promise<{ ok: boolean; deleted: number }> {
+  return api('/api/sessions/bulk-delete', { method: 'POST', body: { ids, profile } })
+}
+
+/** Assinatura de lib/ipc.ts::api — injetada para manter gateway.ts testável. */
+export type ApiFn = <T = unknown>(path: string, init?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown }) => Promise<T>
