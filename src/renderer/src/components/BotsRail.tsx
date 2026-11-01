@@ -1,8 +1,8 @@
 import { GROUP_LABELS, GROUP_ORDER, botTitle, type BotProfile } from '../lib/bots'
-import { ErrorBoundary } from './ErrorBoundary'
-import { ProviderRow } from './panels/widgets'
-import { usePluginSource } from './panels/source'
-import { API, type Quota } from './panels/types'
+import type { ReactNode } from 'react'
+import { Group, Panel, useDefaultLayout } from 'react-resizable-panels'
+import { safeStorage } from '../lib/layout'
+import { ResizeHandle } from './layout/ResizeHandle'
 
 interface Props {
   bots: BotProfile[]
@@ -11,13 +11,16 @@ interface Props {
   loading: boolean
   /** mensagem quando profiles.list e /bots falharam */
   error?: string | null
+  /** rodapé editável (região "rail" do registry) */
+  footer?: ReactNode
 }
 
 // Rail de bots como no wireframe: seções por grupo, item ativo com borda e
 // losango âmbar, "rodando" em verde, contador de sessões; rodapé com cota por
 // provedor (/quota do plugin). SWARM CODERS fica fora até existir fonte real
 // de subagents (P2-15) — sem chips inventados.
-export function BotsRail({ bots, selected, onSelect, loading, error }: Props) {
+export function BotsRail({ bots, selected, onSelect, loading, error, footer }: Props) {
+  const layout = useDefaultLayout({ id: 'hc-rail', storage: safeStorage, onlySaveAfterUserInteractions: true })
   const byGroup = new Map<string, BotProfile[]>()
   for (const bot of bots) {
     const arr = byGroup.get(bot.group) ?? []
@@ -27,29 +30,40 @@ export function BotsRail({ bots, selected, onSelect, loading, error }: Props) {
 
   return (
     <aside className="flex h-full min-w-0 flex-col bg-panel">
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-2">
-        {loading && bots.length === 0 && <div className="px-1 py-1 text-[11px] text-dim">conectando…</div>}
-        {!loading && bots.length === 0 && (
-          <div className="px-1 py-1 text-[11px] text-faint">{error ?? 'nenhum profile retornado'}</div>
-        )}
-        {GROUP_ORDER.map((group) => {
-          const items = byGroup.get(group)
-          if (!items?.length) return null
-          return (
-            <div key={group} className="mb-4">
-              <div className="label px-1 pb-1.5">{GROUP_LABELS[group] ?? group}</div>
-              <div className="space-y-0.5">
-                {items.map((bot) => (
-                  <BotItem key={bot.name} bot={bot} active={bot.name === selected} onSelect={onSelect} />
-                ))}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-      <ErrorBoundary label="Cota" compact className="border-t border-edge py-2">
-        <QuotaFooter />
-      </ErrorBoundary>
+      <Group
+        id="hc-rail"
+        orientation="vertical"
+        className="min-h-0 flex-1"
+        defaultLayout={layout.defaultLayout}
+        onLayoutChanged={layout.onLayoutChanged}
+      >
+        <Panel id="rail-bots" minSize={120}>
+          <div className="h-full overflow-y-auto px-3 pt-3 pb-2">
+            {loading && bots.length === 0 && <div className="px-1 py-1 text-[11px] text-dim">conectando…</div>}
+            {!loading && bots.length === 0 && (
+              <div className="px-1 py-1 text-[11px] text-faint">{error ?? 'nenhum profile retornado'}</div>
+            )}
+            {GROUP_ORDER.map((group) => {
+              const items = byGroup.get(group)
+              if (!items?.length) return null
+              return (
+                <div key={group} className="mb-4">
+                  <div className="label px-1 pb-1.5">{GROUP_LABELS[group] ?? group}</div>
+                  <div className="space-y-0.5">
+                    {items.map((bot) => (
+                      <BotItem key={bot.name} bot={bot} active={bot.name === selected} onSelect={onSelect} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </Panel>
+        <ResizeHandle orientation="vertical" title="arraste para redimensionar o rodapé" />
+        <Panel id="rail-footer" defaultSize={190} minSize={36}>
+          <div className="h-full border-t border-edge">{footer}</div>
+        </Panel>
+      </Group>
     </aside>
   )
 }
@@ -81,31 +95,5 @@ function BotItem({ bot, active, onSelect }: { bot: BotProfile; active: boolean; 
         </span>
       )}
     </button>
-  )
-}
-
-function QuotaFooter() {
-  const quota = usePluginSource<Quota>(API.quota, 60_000)
-  const provs = quota.data?.provedores ?? []
-  return (
-    <div className="max-h-[45%] shrink-0 overflow-y-auto border-t border-edge px-3 py-2.5">
-      <div className="label mb-1.5 flex items-center gap-2">
-        <span>Provedores · cota</span>
-        {quota.error && (
-          <span className="truncate normal-case tracking-normal text-alert" title={quota.error}>
-            erro
-          </span>
-        )}
-      </div>
-      {quota.loading && <div className="text-[10px] text-faint">carregando…</div>}
-      {!quota.loading && provs.length === 0 && (
-        <div className="text-[10px] text-faint">{quota.error ? 'cota indisponível' : 'sem provedores'}</div>
-      )}
-      <div className="space-y-2">
-        {provs.map((p, i) => (
-          <ProviderRow key={`${p.nome}-${i}`} p={p} />
-        ))}
-      </div>
-    </div>
   )
 }

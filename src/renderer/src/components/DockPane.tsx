@@ -1,8 +1,7 @@
 import { useRef } from 'react'
 import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
 import { GROUP_IDS, SIZES, safeStorage } from '../lib/layout'
-import { PANEL_BY_ID } from '../lib/panels'
-import { ErrorBoundary } from './ErrorBoundary'
+import { RegionView } from './panels/RegionView'
 import { ResizeHandle, useCollapseSync } from './layout/ResizeHandle'
 
 export const DOCK_TABS = [
@@ -43,13 +42,14 @@ interface Props {
   onTabChange: (id: string) => void
   /** ids do registry de painéis para a área de cards (região "dock") */
   cards: string[]
+  onCardsChange: (ids: string[]) => void
   cardsOpen: boolean
   onCardsOpenChange: (open: boolean) => void
 }
 
 // Dock lateral: abas (P2 ainda — conteúdo honesto "em breve") em cima e cards
 // do registry embaixo, com alça vertical redimensionável/colapsável.
-export function DockPane({ tab, onTabChange, cards, cardsOpen, onCardsOpenChange }: Props) {
+export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, onCardsOpenChange }: Props) {
   const current = DOCK_TABS.find((t) => t.id === tab) ?? DOCK_TABS[0]
   const cardsRef = usePanelRef()
   const layout = useDefaultLayout({
@@ -63,7 +63,6 @@ export function DockPane({ tab, onTabChange, cards, cardsOpen, onCardsOpenChange
   // Sincroniza preferência (botão/atalho) → painel.
   useCollapseSync(cardsRef, cardsOpen)
 
-  const hasCards = cards.length > 0
 
   return (
     <aside className="flex h-full min-w-0 flex-col bg-panel">
@@ -126,24 +125,15 @@ export function DockPane({ tab, onTabChange, cards, cardsOpen, onCardsOpenChange
           minSize={SIZES.dockCards.min}
           groupResizeBehavior="preserve-pixel-size"
         >
-          <div className="flex h-full flex-col divide-y divide-edge overflow-y-auto border-t border-edge">
-            {!hasCards && (
-              <div className="px-4 py-3 text-[11px] text-faint">
-                nenhum card nesta região — configure em ⚙ → Painéis.
-              </div>
-            )}
-            {cards.map((id) => {
-              const def = PANEL_BY_ID[id]
-              if (!def) return null
-              const C = def.componente
-              return (
-                <div key={id} className="min-h-[96px] shrink-0">
-                  <ErrorBoundary label={def.titulo}>
-                    <C refreshMs={def.refreshMs} />
-                  </ErrorBoundary>
-                </div>
-              )
-            })}
+          <div className="h-full border-t border-edge">
+            <RegionView
+              region="dock"
+              ids={cards}
+              orientation="vertical"
+              minPx={72}
+              onChange={onCardsChange}
+              emptyText="nenhum card aqui — use + para adicionar um bloco."
+            />
           </div>
         </Panel>
       </Group>

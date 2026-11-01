@@ -94,11 +94,10 @@ export const safeStorage: LayoutStorage = {
 /** Apaga os tamanhos salvos dos split panes. */
 export function clearPaneSizes(): void {
   try {
-    for (const id of Object.values(GROUP_IDS)) {
-      for (let i = localStorage.length - 1; i >= 0; i--) {
-        const k = localStorage.key(i)
-        if (k && k.startsWith(`react-resizable-panels:${id}`)) localStorage.removeItem(k)
-      }
+    // inclui os Groups fixos (GROUP_IDS), o da rail e os das regiões (hc-region-*)
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('react-resizable-panels:hc-')) localStorage.removeItem(k)
     }
   } catch {
     /* ignore */

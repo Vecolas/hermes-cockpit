@@ -9,6 +9,7 @@ import { TopBar } from './components/TopBar'
 import { CommandPalette, type PaletteItem } from './components/layout/CommandPalette'
 import { ResizeHandle, useCollapseSync } from './components/layout/ResizeHandle'
 import { SettingsPanel } from './components/layout/SettingsPanel'
+import { RegionView } from './components/panels/RegionView'
 import { SourceProvider, usePluginSource } from './components/panels/source'
 import { API } from './components/panels/types'
 import { botTitle, mergePluginBots, parseProfiles, type BotProfile } from './lib/bots'
@@ -279,6 +280,16 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
       }}
       loading={botsLoading}
       error={railError}
+      footer={
+        <RegionView
+          region="rail"
+          ids={regions.rail}
+          orientation="vertical"
+          minPx={48}
+          onChange={(ids) => setRegions({ ...regions, rail: ids })}
+          emptyText="rodapé vazio — use + para adicionar."
+        />
+      }
     />
     </ErrorBoundary>
   )
@@ -288,6 +299,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
       tab={prefs.dockTab}
       onTabChange={(id) => setPrefs({ dockTab: id })}
       cards={regions.dock}
+      onCardsChange={(ids) => setRegions({ ...regions, dock: ids })}
       cardsOpen={prefs.dockCardsOpen}
       onCardsOpenChange={(open) => setPrefs({ dockCardsOpen: open })}
     />
@@ -410,7 +422,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
             groupResizeBehavior="preserve-pixel-size"
           >
             <ErrorBoundary label="Strip">
-              <StatusStrip panels={regions.strip} />
+              <StatusStrip panels={regions.strip} onChange={(ids) => setRegions({ ...regions, strip: ids })} />
             </ErrorBoundary>
           </Panel>
         </Group>

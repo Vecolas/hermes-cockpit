@@ -4,6 +4,7 @@ import {
   DiffWidget,
   InboxWidget,
   QuotaWidget,
+  RailQuotaWidget,
   SistemaWidget,
   SwarmWidget,
   TarefasWidget,
@@ -15,7 +16,7 @@ import {
 // daqui; quais painéis aparecem em cada região (e em que ordem) é um layout
 // serializado em JSON no localStorage, com reset para o padrão.
 
-export type Region = 'strip' | 'dock'
+export type Region = 'strip' | 'dock' | 'rail'
 
 export interface PanelDef {
   id: string
@@ -39,6 +40,7 @@ export const PANELS: PanelDef[] = [
   { id: 'agenda', titulo: 'Agenda de hoje', componente: AgendaWidget, fonte: ['/agenda'], refreshMs: 60_000 },
   { id: 'quota', titulo: 'Provedores · cota', componente: QuotaWidget, fonte: ['/quota'], refreshMs: 60_000 },
   { id: 'sistema', titulo: 'Sistema · Mac', componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000 },
+  { id: 'cota-rail', titulo: 'Provedores · cota (compacto)', componente: RailQuotaWidget, fonte: ['/quota'], refreshMs: 60_000 },
   { id: 'diff', titulo: 'Diff pendente', componente: DiffWidget, fonte: [], refreshMs: 0 },
   { id: 'swarm', titulo: 'Execuções do swarm', componente: SwarmWidget, fonte: [], refreshMs: 0 },
 ]
@@ -50,11 +52,13 @@ export type RegionLayout = Record<Region, string[]>
 export const DEFAULT_REGIONS: RegionLayout = {
   strip: ['timebox', 'tarefas', 'inbox'],
   dock: ['diff', 'swarm'],
+  rail: ['cota-rail'],
 }
 
 export const REGION_LABELS: Record<Region, string> = {
   strip: 'Strip inferior',
   dock: 'Cards do dock',
+  rail: 'Rodapé da rail',
 }
 
 const KEY = 'hermes-cockpit.regions.v1'
@@ -66,7 +70,11 @@ export function loadRegions(): RegionLayout {
     const p = JSON.parse(raw) as Partial<Record<Region, unknown>>
     const clean = (v: unknown, fb: string[]) =>
       Array.isArray(v) ? Array.from(new Set(v.filter((id): id is string => typeof id === 'string' && id in PANEL_BY_ID))) : fb
-    return { strip: clean(p.strip, DEFAULT_REGIONS.strip), dock: clean(p.dock, DEFAULT_REGIONS.dock) }
+    return {
+      strip: clean(p.strip, DEFAULT_REGIONS.strip),
+      dock: clean(p.dock, DEFAULT_REGIONS.dock),
+      rail: clean(p.rail, DEFAULT_REGIONS.rail),
+    }
   } catch {
     return DEFAULT_REGIONS
   }

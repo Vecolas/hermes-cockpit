@@ -421,3 +421,30 @@ export function SwarmWidget() {
     />
   )
 }
+
+/** Cota compacta para o rodapé da rail (região "rail"). */
+export function RailQuotaWidget({ refreshMs }: WidgetProps) {
+  const quota = usePluginSource<Quota>(API.quota, refreshMs || 60_000)
+  const provs = quota.data?.provedores ?? []
+  return (
+    <div className="h-full overflow-y-auto px-3 py-2.5">
+      <div className="label mb-1.5 flex items-center gap-2">
+        <span>Provedores · cota</span>
+        {quota.error && (
+          <span className="truncate normal-case tracking-normal text-alert" title={quota.error}>
+            erro
+          </span>
+        )}
+      </div>
+      {quota.loading && <div className="text-[10px] text-faint">carregando…</div>}
+      {!quota.loading && provs.length === 0 && (
+        <div className="text-[10px] text-faint">{quota.error ? 'cota indisponível' : 'sem provedores'}</div>
+      )}
+      <div className="space-y-2">
+        {provs.map((p, i) => (
+          <ProviderRow key={`${p.nome}-${i}`} p={p} />
+        ))}
+      </div>
+    </div>
+  )
+}
