@@ -1,41 +1,152 @@
-import { useState } from 'react'
+import { useRef } from 'react'
+import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
+import { GROUP_IDS, SIZES, safeStorage } from '../lib/layout'
+import { PANEL_BY_ID } from '../lib/panels'
+import { ErrorBoundary } from './ErrorBoundary'
+import { ResizeHandle, useCollapseSync } from './layout/ResizeHandle'
 
-const TABS = ['Terminal', 'Diff · Git', 'Preview', 'Arquivos'] as const
+export const DOCK_TABS = [
+  {
+    id: 'terminal',
+    label: 'Terminal',
+    hint: 'xterm.js sobre o endpoint /api/pty do serve — mesma técnica do dashboard oficial.',
+    fase: 'P2-12',
+  },
+  {
+    id: 'diff',
+    label: 'Diff · Git',
+    hint: 'git_probe do backend + diff por arquivo, com Revisar/Commit.',
+    fase: 'P2-13',
+  },
+  {
+    id: 'preview',
+    label: 'Preview',
+    hint: 'preview do que o bot está construindo (URL local / build).',
+    fase: 'P2-14',
+  },
+  {
+    id: 'arquivos',
+    label: 'Arquivos',
+    hint: 'navegador de arquivos do workspace da sessão ativa.',
+    fase: 'P2',
+  },
+  {
+    id: 'tela',
+    label: 'Tela Mac',
+    hint: 'screenshot ao vivo da tela do Mac (computer use / operador bounded).',
+    fase: 'P2-14',
+  },
+] as const
 
-type Tab = (typeof TABS)[number]
-
-const HINTS: Record<Tab, string> = {
-  Terminal: 'xterm.js sobre o endpoint /api/pty do serve — mesma técnica do dashboard oficial.',
-  'Diff · Git': 'git_probe do backend + render de diff por arquivo, com Revisar/Commit.',
-  Preview: 'screenshot ao vivo da tela do Mac (operador bounded).',
-  Arquivos: 'navegador de arquivos do workspace da sessão ativa.',
+interface Props {
+  tab: string
+  onTabChange: (id: string) => void
+  /** ids do registry de painéis para a área de cards (região "dock") */
+  cards: string[]
+  cardsOpen: boolean
+  onCardsOpenChange: (open: boolean) => void
 }
 
-export function DockPane() {
-  const [tab, setTab] = useState<Tab>('Terminal')
+// Dock lateral: abas (P2 ainda — conteúdo honesto "em breve") em cima e cards
+// do registry embaixo, com alça vertical redimensionável/colapsável.
+export function DockPane({ tab, onTabChange, cards, cardsOpen, onCardsOpenChange }: Props) {
+  const current = DOCK_TABS.find((t) => t.id === tab) ?? DOCK_TABS[0]
+  const cardsRef = usePanelRef()
+  const layout = useDefaultLayout({
+    id: GROUP_IDS.dock,
+    storage: safeStorage,
+    onlySaveAfterUserInteractions: true,
+  })
+  const wantOpen = useRef(cardsOpen)
+  wantOpen.current = cardsOpen
+
+  // Sincroniza preferência (botão/atalho) → painel.
+  useCollapseSync(cardsRef, cardsOpen)
+
+  const hasCards = cards.length > 0
 
   return (
-    <aside className="flex h-full flex-col border-l border-edge bg-panel">
-      <div className="flex border-b border-edge">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 border-b-2 px-2 py-2.5 text-[11px] transition-colors ${
-              tab === t
-                ? 'border-amber text-ink'
-                : 'border-transparent text-faint hover:text-dim'
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+    <aside className="flex h-full min-w-0 flex-col bg-panel">
+      <div className="flex shrink-0 flex-wrap gap-1 border-b border-edge px-2 pt-2" role="tablist">
+        {DOCK_TABS.map((t) => {
+          const on = t.id === current.id
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => onTabChange(t.id)}
+              className={`-mb-px rounded-t-md border px-3 py-1.5 text-[11px] transition-colors ${
+                on
+                  ? 'border-edge2 border-b-panel bg-panel2 text-ink'
+                  : 'border-transparent text-faint hover:text-dim'
+              }`}
+            >
+              {t.label}
+            </button>
+          )
+        })}
       </div>
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-        <div className="label">{tab}</div>
-        <p className="text-[12px] leading-relaxed text-dim">{HINTS[tab]}</p>
-        <span className="rounded border border-edge2 px-2 py-1 text-[10px] text-faint">v2</span>
-      </div>
+
+      <Group
+        id={GROUP_IDS.dock}
+        orientation="vertical"
+        className="min-h-0 flex-1"
+        defaultLayout={layout.defaultLayout}
+        onLayoutChanged={(l, meta) => {
+          layout.onLayoutChanged(l, meta)
+          // só arrasto/teclado do usuário muda a preferência (não o mount)
+          if (meta.isUserInteraction && l['dock-cards'] !== undefined) {
+            const open = l['dock-cards'] > 0.5
+            if (open !== wantOpen.current) onCardsOpenChange(open)
+          }
+        }}
+      >
+        <Panel id="dock-tabs" minSize={SIZES.dockTabsMin}>
+          <div className="flex h-full flex-col items-center justify-center gap-3 overflow-auto px-6 text-center">
+            <div className="label">{current.label}</div>
+            <p className="max-w-xs text-[12px] leading-relaxed text-dim">{current.hint}</p>
+            <span className="rounded border border-edge2 px-2 py-1 text-[10px] text-faint">
+              em breve ({current.fase})
+            </span>
+          </div>
+        </Panel>
+        <ResizeHandle
+          orientation="vertical"
+          title="arraste para redimensionar · duplo clique para recolher/expandir os cards"
+          onToggle={() => onCardsOpenChange(!cardsOpen)}
+        />
+        <Panel
+          id="dock-cards"
+          panelRef={cardsRef}
+          collapsible
+          collapsedSize={0}
+          defaultSize={SIZES.dockCards.default}
+          minSize={SIZES.dockCards.min}
+          groupResizeBehavior="preserve-pixel-size"
+        >
+          <div className="flex h-full flex-col divide-y divide-edge overflow-y-auto border-t border-edge">
+            {!hasCards && (
+              <div className="px-4 py-3 text-[11px] text-faint">
+                nenhum card nesta região — configure em ⚙ → Painéis.
+              </div>
+            )}
+            {cards.map((id) => {
+              const def = PANEL_BY_ID[id]
+              if (!def) return null
+              const C = def.componente
+              return (
+                <div key={id} className="min-h-[96px] shrink-0">
+                  <ErrorBoundary label={def.titulo}>
+                    <C refreshMs={def.refreshMs} />
+                  </ErrorBoundary>
+                </div>
+              )
+            })}
+          </div>
+        </Panel>
+      </Group>
     </aside>
   )
 }

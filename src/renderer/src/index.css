@@ -29,6 +29,87 @@ body,
   -webkit-font-smoothing: antialiased;
 }
 
+html,
+body {
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Escala/densidade da UI (P1-10, lib/theme.ts): --ui-zoom 0.85..1.25.
+   `zoom` escala inclusive px fixos (text-[11px] etc.); as dimensões do #root
+   são compensadas para ele continuar ocupando exatamente a janela. */
+:root {
+  --ui-zoom: 1;
+}
+#root {
+  zoom: var(--ui-zoom);
+  width: calc(100vw / var(--ui-zoom));
+  height: calc(100vh / var(--ui-zoom));
+  overflow: hidden;
+}
+
+/* Topbar = região de arrasto da janela (titleBarStyle hiddenInset). */
+.app-drag {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.app-drag button,
+.app-drag input,
+.app-drag select,
+.app-drag a,
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Alças dos split panes (react-resizable-panels v4 <Separator>). 1px visível;
+   o alvo de pega mínimo é garantido pela lib. */
+.hc-sep {
+  position: relative;
+  background: var(--color-edge);
+  outline: none;
+  transition: background-color 120ms ease;
+}
+.hc-sep-x {
+  width: 1px;
+}
+.hc-sep-y {
+  height: 1px;
+}
+.hc-sep::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.hc-sep-x::after {
+  left: -1px;
+  right: -1px;
+}
+.hc-sep-y::after {
+  top: -1px;
+  bottom: -1px;
+}
+.hc-sep[data-separator="hover"]::after,
+.hc-sep[data-separator="focus"]::after {
+  background: color-mix(in srgb, var(--color-amber) 45%, transparent);
+}
+.hc-sep[data-separator="active"]::after {
+  background: var(--color-amber);
+}
+.hc-sep[data-separator="disabled"] {
+  background: var(--color-edge);
+}
+
+/* Topbar responsiva: em janela estreita as pills viram só bolinhas. */
+@media (max-width: 1180px) {
+  .hc-pill-label {
+    display: none;
+  }
+  .hc-pill {
+    padding-inline: 0.45rem;
+  }
+}
+
 /* título serifado como na splash do Hermes */
 .font-display {
   font-family: var(--font-display);
