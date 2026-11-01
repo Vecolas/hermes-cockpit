@@ -163,3 +163,64 @@ Abrir o app empacotado pelo Finder: rail mostra os 8 bots agrupados; clicar no
 chief abre o chat eterno dele; mandar mensagem e ver streaming; receber um
 pedido de aprovação e aprovar pelo card; fechar o app mata o `hermes serve`
 filho. Sem nada rodando solto (`ps aux | grep` limpo).
+
+## 9. Rodada v2 (2026-11-01) — views, swarm, ops, transcriber, devtools
+
+**O que existe.** A área central tem 4 views trocadas por abas na topbar
+(⌘1..⌘4, `UiPrefs.view`): **Chat · Swarm · Ops · Transcrever**. Chat fica sempre
+montado; as outras montam na 1ª visita e depois ficam vivas escondidas
+(`useViewActive()` em `components/layout/views.tsx`). Paleta ⌘K reescrita
+(views, bots, sessões recentes, comandos/skills, repos, layout). Kit de UI em
+`components/ui/` (Button, Tabs, Badge, Skeleton, ConfirmButton de 2 cliques,
+Toaster...). Utilitárias de animação `hc-*` em `index.css` (respeitam
+`prefers-reduced-motion`).
+
+- **Chat**: abas (Bot Chat fixo + side-chats salvos em `localStorage`), drawer de
+  sessões (busca, renomear, exportar, apagar com 2 cliques), Markdown melhor,
+  cards de tool call, ditado no composer via `useDictation`.
+- **Seleção de modelo**: `chat/ModelPicker.tsx` (busca, grupos por provider,
+  badges local/cloud, escopo "este chat" vs "padrão do bot", teclado) e, na
+  view Ops > Modelos, a tabela "Bots × modelo padrão" (PUT
+  `/api/profiles/{name}/model`) + gestão do Ollama (pull/descarregar/remover).
+  Codex escondido nos dois.
+- **Transcriber**: `src/main/ipc/transcriber.ts` sobe/reusa o `server.py` na
+  porta 7100 (tudo pelo main: o FastAPI não manda CORS). View com Arquivo,
+  YouTube, Tempo real (mic/sistema/ambos) e Histórico. Morre com o app
+  (`stopTranscriber()` no quit; só mata o processo que o cockpit subiu).
+- **Swarm** (Claude Code): runner/MCP em `swarm/`, contrato em
+  `docs/SWARM-SPEC.md`; view com runs agrupadas, stream, diff, aprovações e
+  "continuar conversa"; aba "Subagents Hermes".
+- **Ops**: portas, aplicações/processos, projetos (`~/dev`, `~/Documents`),
+  containers (Docker parado = estado vazio honesto), modelos, armazenamento.
+  Matar/remover sempre com confirmação inline de 2 cliques.
+- **Dock**: Terminal (xterm sobre `/api/pty`), Diff · Git, Arquivos, Preview,
+  Swarm, Tela Mac (`ops:screenshot`).
+
+**Instalar o swarm.** `npm run swarm:install` copia `swarm/` para
+`~/.hermes/cockpit/swarm-bin/`, cria o estado em `~/.hermes/cockpit/swarm/` e
+registra o MCP `claude_swarm` em todos os profiles (backup
+`config.yaml.bak-<data>`). Rode de novo sempre que `swarm/` mudar. Processos
+Hermes já vivos só enxergam o MCP depois de reiniciar/recarregar a config.
+Worktrees em `~/.hermes/cockpit/worktrees/<repo>-<runId>` (branch
+`hermes/<runId>`).
+
+**Limitações conhecidas.**
+- `/api/pty` roda `hermes --tui` do profile, não um shell, e ignora cwd — o
+  Terminal do dock não segue o workspace. Shell real exigiria canal novo no
+  main (`/usr/bin/script -q /dev/null /bin/zsh -l`).
+- Swarm: Bash somente-leitura é autoaprovado pelo Claude Code (não gera card).
+  Workers rodam com `--setting-sources=` (nenhuma fonte: sem plugins/hooks nem
+  settings do repo, que poderiam liberar tools sem aprovação);
+  `SWARM_SETTING_SOURCES=user|local|all` (all = user,local) reabilita — `project` nunca.
+- Transcriber: o servidor não emite parciais (janelas de ~4s, só `append`);
+  `server.py` antigo sem `/api/audio-devices` precisa ser reiniciado à mão.
+  Arquivo arrastado > 1 GB: use "escolher arquivo".
+- Seleção de modelo: escopo "este chat" no Bot Chat dura até o próximo resume;
+  contexto só aparece para o modelo atual; providers cloud da Ops vêm de um
+  profile só.
+- Nada desta rodada foi validado com GUI (o app estava em uso): falta testar
+  drag de abas, overlays, mic/MediaRecorder, xterm/resize, iframe do Preview,
+  captura de tela. Zoom CSS do `#root` ≠ 1 pode deslocar a seleção no xterm.
+- Integração (esta rodada): `serve` agora sobe com `cwd = $HOME` (default-cwd
+  útil); `hermes:api` valida `..` só no pathname; `ops:open` aceita também
+  `x-apple.systempreferences:...?Privacy_*`; `stopSwarmWatch()` no quit.

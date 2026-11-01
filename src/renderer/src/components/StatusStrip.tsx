@@ -9,7 +9,7 @@ const STRIP_MIN_PX = 220
 // fonte e do próprio erro. Janela estreita: rola na horizontal.
 export function StatusStrip({ panels, onChange }: { panels: string[]; onChange: (ids: string[]) => void }) {
   return (
-    <footer className="h-full min-h-0 overflow-x-auto overflow-y-hidden border-t border-edge bg-panel">
+    <footer className="h-full min-h-0 overflow-x-auto overflow-y-hidden border-t border-edge bg-[linear-gradient(180deg,var(--color-panel),color-mix(in_srgb,var(--color-panel)_92%,var(--color-void)))]">
       <div className="h-full" style={{ minWidth: Math.max(1, panels.length) * STRIP_MIN_PX }}>
         <RegionView
           region="strip"

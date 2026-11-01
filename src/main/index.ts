@@ -2,6 +2,9 @@ import { join } from 'node:path'
 import { app, BrowserWindow, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron'
 import { apiFetch, type ApiInit, ensureBackend, hasBackend, stopBackend, stopBackendGracefully } from './backend'
 import { registerDomainIpc } from './ipc'
+import { stopAllShells } from './ipc/shell'
+import { stopSwarmWatch } from './ipc/swarm'
+import { stopTranscriber } from './ipc/transcriber'
 import { closeAllWs, registerWsProxy } from './wsproxy'
 
 // Topbar do renderer assumida com ~44px de altura: os traffic lights (12px)
@@ -113,8 +116,24 @@ app.on('window-all-closed', () => {
 let quitReady = false
 let quitting = false
 
+/** Filhos dos domínios (transcriber server.py, WS ao vivo). Nunca lança: o quit segue. */
+function stopDomainChildren(): void {
+  try {
+    stopTranscriber()
+  } catch (err) {
+    console.error('[cockpit] stopTranscriber falhou no quit:', err)
+  }
+  try {
+    stopAllShells()
+    stopSwarmWatch() // só o fs.watch; runs do swarm são detached e seguem vivas
+  } catch (err) {
+    console.error('[cockpit] stopSwarmWatch falhou no quit:', err)
+  }
+}
+
 app.on('before-quit', (event) => {
   if (quitReady) return
+  stopDomainChildren()
   closeAllWs()
   if (!hasBackend()) {
     stopBackend() // marca shuttingDown — nenhum spawn novo durante o quit
@@ -131,6 +150,7 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  stopDomainChildren()
   closeAllWs()
   stopBackend()
 })

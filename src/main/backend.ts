@@ -102,6 +102,9 @@ function start(): Promise<BackendInfo> {
         // PID sumir e sai sozinho em ~2s. Modo só-PID (sem start marker).
         HERMES_PARENT_PID: String(process.pid),
       },
+      // App aberto pelo Finder herda cwd '/'; /api/fs/default-cwd devolve o
+      // cwd do serve, então ancora no HOME.
+      cwd: homedir(),
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     })
@@ -170,7 +173,10 @@ export interface ApiInit {
 }
 
 export async function apiFetch(path: string, init: ApiInit = {}): Promise<unknown> {
-  if (typeof path !== 'string' || !path.startsWith('/api/') || path.includes('..')) {
+  // Só o pathname é validado contra '..' — a query pode carregar nomes de
+  // arquivo legítimos ('a..b.txt'); o serve valida os próprios parâmetros.
+  const pathname = typeof path === 'string' ? path.split(/[?#]/, 1)[0] : ''
+  if (typeof path !== 'string' || !pathname.startsWith('/api/') || /\.\.|%2e%2e/i.test(pathname)) {
     throw new Error(`caminho REST inválido: ${String(path).slice(0, 120)}`)
   }
   const info = await ensureBackend()

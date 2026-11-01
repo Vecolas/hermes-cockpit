@@ -5,7 +5,14 @@ import type { LayoutStorage } from 'react-resizable-panels'
 // arrastados pelo usuário são salvos pelo próprio react-resizable-panels
 // (useDefaultLayout) através de `safeStorage`.
 
+/** Views da área central (abas da topbar, ⌘1..⌘4). */
+export const VIEW_IDS = ['chat', 'swarm', 'ops', 'transcrever'] as const
+export type ViewId = (typeof VIEW_IDS)[number]
+export const isViewId = (v: unknown): v is ViewId => typeof v === 'string' && (VIEW_IDS as readonly string[]).includes(v)
+
 export interface UiPrefs {
+  /** view ativa na área central */
+  view: ViewId
   railOpen: boolean
   dockOpen: boolean
   stripOpen: boolean
@@ -15,6 +22,7 @@ export interface UiPrefs {
 }
 
 export const DEFAULT_PREFS: UiPrefs = {
+  view: 'chat',
   railOpen: true,
   dockOpen: true,
   stripOpen: true,
@@ -53,6 +61,7 @@ export function loadPrefs(): UiPrefs {
     const p = JSON.parse(raw) as Partial<UiPrefs>
     const b = (v: unknown, fb: boolean) => (typeof v === 'boolean' ? v : fb)
     return {
+      view: isViewId(p.view) ? p.view : DEFAULT_PREFS.view,
       railOpen: b(p.railOpen, true),
       dockOpen: b(p.dockOpen, true),
       stripOpen: b(p.stripOpen, true),

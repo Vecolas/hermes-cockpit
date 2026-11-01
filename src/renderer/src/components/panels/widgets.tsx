@@ -1,3 +1,4 @@
+import { SkeletonLines } from '../ui/Skeleton'
 import { Bar, PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import {
@@ -340,10 +341,13 @@ export function ProviderRow({ p }: { p: NonNullable<Quota['provedores']>[number]
   )
 }
 
+// Tom da barra derivado do nome do provedor (hash estável) — sem lista fixa de
+// provedores: a cota é data-driven, quem aparece é o que o plugin devolver.
+const TONES = ['amber', 'phos', 'cyanic'] as const
 function i2tone(nome?: string): 'amber' | 'phos' | 'cyanic' {
-  if (nome === 'Kimi') return 'cyanic'
-  if (nome === 'Claude Code') return 'phos'
-  return 'amber'
+  let h = 0
+  for (const ch of nome ?? '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return TONES[h % TONES.length]
 }
 
 function fmtTokens(n: number): string {
@@ -436,7 +440,7 @@ export function RailQuotaWidget({ refreshMs }: WidgetProps) {
           </span>
         )}
       </div>
-      {quota.loading && <div className="text-[10px] text-faint">carregando…</div>}
+      {quota.loading && <SkeletonLines lines={4} />}
       {!quota.loading && provs.length === 0 && (
         <div className="text-[10px] text-faint">{quota.error ? 'cota indisponível' : 'sem provedores'}</div>
       )}

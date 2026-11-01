@@ -54,11 +54,11 @@ export function SettingsPanel(p: Props) {
   }, [p])
 
   return (
-    <div className="no-drag fixed inset-0 z-50 flex justify-end bg-void/50" onMouseDown={p.onClose}>
+    <div className="no-drag hc-scrim fixed inset-0 z-50 flex justify-end" onMouseDown={p.onClose}>
       <div
         role="dialog"
         aria-label="Configurações"
-        className="flex h-full w-[min(380px,100vw)] flex-col border-l border-edge2 bg-panel shadow-2xl"
+        className="hc-slide-right flex h-full w-[min(380px,100vw)] flex-col border-l border-edge2 bg-panel shadow-[var(--hc-shadow-3)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">

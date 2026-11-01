@@ -100,9 +100,9 @@ function BlockToolbar({
   onHide: () => void
 }) {
   const btn =
-    'flex h-5 w-5 items-center justify-center rounded text-[11px] text-faint hover:bg-panel2 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent'
+    'hc-press flex h-5 w-5 items-center justify-center rounded text-[11px] text-faint hover:bg-panel2 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent'
   return (
-    <div className="pointer-events-none absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded border border-edge bg-panel/95 px-0.5 opacity-0 shadow transition-opacity group-hover/block:pointer-events-auto group-hover/block:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+    <div className="hc-glass pointer-events-none absolute top-1.5 right-1.5 z-10 flex -translate-y-0.5 items-center gap-0.5 rounded-md px-0.5 opacity-0 transition-[opacity,translate] duration-[var(--hc-dur-2)] group-hover/block:pointer-events-auto group-hover/block:translate-y-0 group-hover/block:opacity-100 focus-within:pointer-events-auto focus-within:translate-y-0 focus-within:opacity-100">
       <button type="button" className={btn} disabled={!canBack} onClick={() => onMove(-1)} title="mover para trás">
         {horizontal ? '◂' : '▴'}
       </button>
@@ -154,12 +154,15 @@ function AddMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="adicionar bloco"
-        className="flex h-5 w-5 items-center justify-center rounded border border-edge2 bg-panel text-[12px] text-dim hover:border-amber/60 hover:text-amber"
+        aria-expanded={open}
+        className={`hc-press flex h-5 w-5 items-center justify-center rounded border bg-panel text-[12px] hover:border-amber/60 hover:text-amber ${
+          open ? 'border-amber/60 text-amber' : 'border-edge2 text-dim'
+        }`}
       >
-        +
+        <span className={`transition-transform duration-[var(--hc-dur-2)] ${open ? 'rotate-45' : ''}`}>+</span>
       </button>
       {open && (
-        <div className="absolute bottom-6 right-0 min-w-[200px] rounded-md border border-edge2 bg-panel2 py-1 shadow-lg">
+        <div className="hc-glass hc-pop absolute right-0 bottom-6 min-w-[200px] rounded-md py-1" role="menu">
           <div className="label px-3 pb-1 pt-0.5">adicionar bloco</div>
           {hidden.map((p) => (
             <button
@@ -169,8 +172,10 @@ function AddMenu({
                 onAdd(p.id)
                 setOpen(false)
               }}
-              className="block w-full px-3 py-1 text-left text-[11px] text-dim hover:bg-panel hover:text-ink"
+              role="menuitem"
+              className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] text-dim transition-colors hover:bg-panel2 hover:text-ink"
             >
+              <span aria-hidden className="text-faint">+</span>
               {p.titulo}
             </button>
           ))}

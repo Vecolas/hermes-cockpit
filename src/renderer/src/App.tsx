@@ -6,26 +6,37 @@ import { DockPane } from './components/DockPane'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { StatusStrip } from './components/StatusStrip'
 import { TopBar } from './components/TopBar'
-import { CommandPalette, type PaletteItem } from './components/layout/CommandPalette'
+import { CommandPalette, type PaletteItem, type PaletteSource } from './components/layout/CommandPalette'
 import { ResizeHandle, useCollapseSync } from './components/layout/ResizeHandle'
 import { SettingsPanel } from './components/layout/SettingsPanel'
+import { useSwarmBadge } from './components/layout/useSwarmBadge'
+import { VIEWS, ViewSlot } from './components/layout/views'
+import { OpsView } from './components/ops/OpsView'
+import { SwarmView } from './components/swarm/SwarmView'
+import { TranscriberView } from './components/transcriber/TranscriberView'
+import { Toaster } from './components/ui/Toaster'
 import { RegionView } from './components/panels/RegionView'
 import { SourceProvider, usePluginSource } from './components/panels/source'
 import { API } from './components/panels/types'
 import { botTitle, mergePluginBots, parseProfiles, type BotProfile } from './lib/bots'
 import { connectBackend, saveManual, type Connection } from './lib/connection'
+import { commandsCatalog, flattenCatalog, listSessions } from './lib/gateway'
+import { hasMain, invoke } from './lib/ipc'
 import {
   GROUP_IDS,
   NARROW_PX,
   SIZES,
   clearPaneSizes,
+  isViewId,
   loadPrefs,
   safeStorage,
   savePrefs,
   type UiPrefs,
+  type ViewId,
 } from './lib/layout'
 import { loadRegions, resetRegions, saveRegions, type RegionLayout } from './lib/panels'
 import { HermesRpc, type ConnState } from './lib/rpc'
+import { toast } from './lib/toast'
 import {
   PRESETS,
   SCALE_STEP,
@@ -195,6 +206,45 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   const toggleFocus = () => setPrefs((p) => ({ focus: !p.focus }))
   const bumpScale = (d: number) => setTheme((t) => ({ ...t, scale: clampScale(d === 0 ? 100 : t.scale + d) }))
 
+  // ─── views da área central (Chat · Swarm · Ops · Transcrever) ─────────────
+  const view = prefs.view
+  const setView = useCallback((v: ViewId) => setPrefs({ view: v }), [setPrefs])
+  const swarmBadge = useSwarmBadge()
+
+  // Intents para componentes de outros donos via window CustomEvent (hc:*).
+  // Despachados num efeito DEPOIS do commit que troca a view: a view recém-
+  // montada (efeitos dos filhos rodam antes dos do pai) já está ouvindo.
+  const [intent, setIntent] = useState<{ name: string; detail?: unknown; seq: number } | null>(null)
+  const emit = useCallback(
+    (name: string, detail?: unknown) => setIntent((p) => ({ name, detail, seq: (p?.seq ?? 0) + 1 })),
+    [],
+  )
+  useEffect(() => {
+    if (intent) window.dispatchEvent(new CustomEvent(intent.name, { detail: intent.detail }))
+  }, [intent])
+
+  // Eventos de entrada: hc:dock-tab (detail = id da aba do dock) e hc:view (detail = ViewId).
+  const narrowRef = useRef(narrow)
+  narrowRef.current = narrow
+  useEffect(() => {
+    const onDockTab = (e: Event) => {
+      const id = (e as CustomEvent<unknown>).detail
+      if (typeof id !== 'string' || !id) return
+      setPrefs((p) => ({ dockTab: id, ...(p.focus ? {} : { dockOpen: true }) }))
+      if (narrowRef.current) setDockOverlay(true)
+    }
+    const onView = (e: Event) => {
+      const v = (e as CustomEvent<unknown>).detail
+      if (isViewId(v)) setView(v)
+    }
+    window.addEventListener('hc:dock-tab', onDockTab)
+    window.addEventListener('hc:view', onView)
+    return () => {
+      window.removeEventListener('hc:dock-tab', onDockTab)
+      window.removeEventListener('hc:view', onView)
+    }
+  }, [setPrefs, setView])
+
   const resetSizes = () => {
     clearPaneSizes()
     setPrefs({ railOpen: true, dockOpen: true, stripOpen: true, dockCardsOpen: true, focus: false })
@@ -226,6 +276,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
     else if (k === 'b' && !e.shiftKey) act(toggleRail)
     else if (k === 'j' && !e.shiftKey) act(toggleDock)
     else if (k === ',') act(() => setSettings('aparencia'))
+    else if (/^[1-9]$/.test(k) && !e.shiftKey && VIEWS[Number(k) - 1]) act(() => setView(VIEWS[Number(k) - 1].id))
   }
   useEffect(() => {
     const h = (e: KeyboardEvent) => keyRef.current(e)
@@ -234,40 +285,218 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   }, [])
 
   // ─── command palette ──────────────────────────────────────────────────────
+  const selectBot = (name: string) => {
+    setSelected(name)
+    setRailOverlay(false)
+  }
+  const resetLayout = () => {
+    resetSizes()
+    setRegionsState(resetRegions())
+    toast({ title: 'Layout restaurado', detail: 'tamanhos, painéis abertos e blocos das regiões voltaram ao padrão', tone: 'ok' })
+  }
+
   const paletteItems: PaletteItem[] = [
+    ...VIEWS.map((v) => ({
+      id: `view:${v.id}`,
+      group: 'Views',
+      icon: v.icon,
+      label: `Ir para ${v.label}`,
+      hint: v.id === view ? 'atual' : undefined,
+      keywords: `${v.id} ${v.hint}`,
+      shortcut: ['⌘', v.key],
+      preview: { title: v.label, body: v.hint },
+      run: () => setView(v.id),
+    })),
     ...bots.map((b) => ({
       id: `bot:${b.name}`,
-      group: 'bot',
-      label: `Abrir chat: ${botTitle(b.name)}`,
+      group: 'Bots',
+      icon: b.rodando ? '●' : '◇',
+      label: botTitle(b.name),
       hint: [b.name, b.modelo].filter(Boolean).join(' · '),
+      keywords: `chat ${b.group} ${b.provider ?? ''} ${b.descricao ?? ''}`,
+      preview: {
+        title: `Bot Chat · ${botTitle(b.name)}`,
+        body: b.descricao ?? 'abre o chat eterno deste bot',
+        rows: [
+          ['profile', b.name],
+          ['grupo', b.group],
+          ['modelo', b.modelo ?? '—'],
+          ['provider', b.provider ?? '—'],
+          ['sessões', b.sessoes != null ? String(b.sessoes) : '—'],
+          ['estado', b.rodando ? 'rodando' : 'parado'],
+        ] as Array<[string, string]>,
+      },
       run: () => {
-        setSelected(b.name)
-        setRailOverlay(false)
+        selectBot(b.name)
+        setView('chat')
       },
     })),
-    { id: 'focus', group: 'layout', label: focus ? 'Sair do modo foco' : 'Modo foco', hint: '⌘.', run: toggleFocus },
-    { id: 'rail', group: 'layout', label: 'Alternar rail de bots', hint: '⌘B', run: toggleRail },
-    { id: 'dock', group: 'layout', label: 'Alternar dock', hint: '⌘J', run: toggleDock },
-    { id: 'strip', group: 'layout', label: 'Alternar strip inferior', run: toggleStrip },
+    ...(bot
+      ? [
+          {
+            id: 'act:side-chat',
+            group: 'Ações',
+            icon: '+',
+            label: `Novo side-chat com ${botTitle(bot.name)}`,
+            keywords: 'sessão nova conversa',
+            preview: { body: 'cria uma sessão visível nova para o bot selecionado (o Bot Chat continua intacto)' },
+            run: () => {
+              setView('chat')
+              emit('hc:chat-new-side', { profile: bot.name })
+            },
+          },
+        ]
+      : []),
+    {
+      id: 'act:claude-task',
+      group: 'Ações',
+      icon: '⋮⋮',
+      label: 'Nova tarefa Claude Code',
+      keywords: 'swarm run spawn worktree delegar',
+      preview: { body: 'abre o Swarm com o formulário de nova run (worktree isolado + aprovação na UI)' },
+      run: () => {
+        setView('swarm')
+        emit('hc:swarm-new-task', {})
+      },
+    },
+    { id: 'focus', group: 'Layout', icon: '◎', label: focus ? 'Sair do modo foco' : 'Modo foco', shortcut: ['⌘', '.'], run: toggleFocus },
+    { id: 'rail', group: 'Layout', icon: '◧', label: 'Alternar rail de bots', shortcut: ['⌘', 'B'], run: toggleRail },
+    { id: 'dock', group: 'Layout', icon: '◨', label: 'Alternar dock', shortcut: ['⌘', 'J'], run: toggleDock },
+    { id: 'strip', group: 'Layout', icon: '▁', label: 'Alternar strip inferior', run: toggleStrip },
     {
       id: 'cards',
-      group: 'layout',
+      group: 'Layout',
+      icon: '▤',
       label: 'Alternar cards do dock',
       run: () => setPrefs((p) => ({ dockCardsOpen: !p.dockCardsOpen })),
     },
-    { id: 'panels', group: 'layout', label: 'Configurar painéis…', run: () => setSettings('paineis') },
-    { id: 'reset-sizes', group: 'layout', label: 'Restaurar tamanhos dos painéis', run: resetSizes },
+    { id: 'panels', group: 'Layout', icon: '▦', label: 'Configurar painéis…', run: () => setSettings('paineis') },
+    { id: 'reset-sizes', group: 'Layout', icon: '↺', label: 'Restaurar tamanhos dos painéis', run: resetSizes },
+    {
+      id: 'reset-layout',
+      group: 'Layout',
+      icon: '↺',
+      label: 'Resetar layout (tamanhos + blocos)',
+      preview: { body: 'volta tamanhos, panes abertos e blocos de strip/dock/rail ao padrão' },
+      run: resetLayout,
+    },
     ...(Object.keys(PRESETS) as ThemePreset[]).map((id) => ({
       id: `theme:${id}`,
-      group: 'tema',
+      group: 'Tema',
+      icon: theme.preset === id ? '●' : '○',
       label: `Tema ${PRESETS[id].label}`,
+      hint: theme.preset === id ? 'atual' : undefined,
       run: () => setTheme((t) => ({ ...t, preset: id })),
     })),
-    { id: 'zoom-in', group: 'tema', label: 'Aumentar escala', hint: '⌘=', run: () => bumpScale(SCALE_STEP) },
-    { id: 'zoom-out', group: 'tema', label: 'Diminuir escala', hint: '⌘-', run: () => bumpScale(-SCALE_STEP) },
-    { id: 'zoom-reset', group: 'tema', label: 'Escala 100%', hint: '⌘0', run: () => bumpScale(0) },
-    { id: 'settings', group: 'app', label: 'Configurações…', hint: '⌘,', run: () => setSettings('aparencia') },
+    { id: 'zoom-in', group: 'Tema', icon: '+', label: 'Aumentar escala', hint: `${theme.scale}%`, shortcut: ['⌘', '='], run: () => bumpScale(SCALE_STEP) },
+    { id: 'zoom-out', group: 'Tema', icon: '−', label: 'Diminuir escala', hint: `${theme.scale}%`, shortcut: ['⌘', '-'], run: () => bumpScale(-SCALE_STEP) },
+    { id: 'zoom-reset', group: 'Tema', icon: '=', label: 'Escala 100%', shortcut: ['⌘', '0'], run: () => bumpScale(0) },
+    { id: 'settings', group: 'App', icon: '⚙', label: 'Configurações…', shortcut: ['⌘', ','], run: () => setSettings('aparencia') },
   ]
+
+  // Fontes assíncronas da paleta (carregam ao abrir; falha vira linha de erro na seção).
+  const paletteSources: PaletteSource[] = []
+  if (rpc && connState === 'open' && bot) {
+    const profile = bot.name
+    paletteSources.push(
+      {
+        group: 'Sessões recentes',
+        load: async () => {
+          const rows = await listSessions(rpc, profile, 12)
+          return rows.map((r) => {
+            const title = r.title?.trim() || r.preview?.trim().slice(0, 60) || r.id
+            const when = typeof r.started_at === 'number' ? new Date(r.started_at * (r.started_at < 1e12 ? 1000 : 1)) : null
+            return {
+              id: `session:${r.id}`,
+              group: 'Sessões recentes',
+              icon: '❐',
+              label: title,
+              hint: [botTitle(profile), r.message_count != null ? `${r.message_count} msgs` : null].filter(Boolean).join(' · '),
+              keywords: `${r.preview ?? ''} ${r.source ?? ''}`,
+              preview: {
+                title,
+                body: r.preview || undefined,
+                rows: [
+                  ['bot', botTitle(profile)],
+                  ['início', when ? when.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'],
+                  ['mensagens', r.message_count != null ? String(r.message_count) : '—'],
+                  ['origem', r.source ?? '—'],
+                ] as Array<[string, string]>,
+              },
+              run: () => {
+                setView('chat')
+                emit('hc:chat-open-session', { profile, id: r.id, title })
+              },
+            }
+          })
+        },
+      },
+      {
+        group: 'Comandos',
+        load: async () => {
+          const cmds = flattenCatalog(await commandsCatalog(rpc, { profile }))
+          return cmds
+            .sort((a, b) => b.usage - a.usage || a.name.localeCompare(b.name))
+            .map((c) => ({
+              id: `cmd:${c.name}`,
+              group: 'Comandos',
+              icon: c.kind === 'skill' ? '✦' : '/',
+              label: c.name,
+              hint: c.description && c.description !== 'skill' ? c.description.slice(0, 70) : c.kind,
+              preview: {
+                title: c.name,
+                body: c.description || undefined,
+                rows: [
+                  ['tipo', c.kind === 'skill' ? 'skill' : 'comando'],
+                  ['uso', String(c.usage)],
+                  ['bot', botTitle(profile)],
+                ] as Array<[string, string]>,
+              },
+              run: () => {
+                setView('chat')
+                emit('hc:chat-insert', { text: `${c.name} ` })
+              },
+            }))
+        },
+      },
+    )
+  }
+  if (hasMain()) {
+    paletteSources.push({
+      group: 'Repos',
+      load: async () => {
+        const repos = await invoke<unknown>('ops:repos')
+        if (!Array.isArray(repos)) throw new Error('ops:repos sem lista')
+        type Repo = { path: string; name: string; branch?: string; dirty: number; ahead?: number; behind?: number; lastCommit?: string }
+        return (repos as Repo[])
+          .filter((r) => r && typeof r.path === 'string')
+          .map((r) => ({
+            id: `repo:${r.path}`,
+            group: 'Repos',
+            icon: '⎇',
+            label: `Abrir ${r.name || r.path}`,
+            hint: [r.branch, r.dirty ? `${r.dirty} alterado(s)` : 'limpo'].filter(Boolean).join(' · '),
+            keywords: `repo git vscode ${r.path}`,
+            preview: {
+              title: r.name || r.path,
+              body: 'abre no VS Code',
+              rows: [
+                ['caminho', r.path],
+                ['branch', r.branch ?? '—'],
+                ['alterados', String(r.dirty ?? 0)],
+                ['↑/↓', `${r.ahead ?? 0} / ${r.behind ?? 0}`],
+                ['último', r.lastCommit ?? '—'],
+              ] as Array<[string, string]>,
+            },
+            run: () => {
+              invoke('ops:open', { kind: 'vscode', path: r.path }).catch((e: unknown) =>
+                toast({ title: `Não abriu ${r.name || r.path}`, detail: e instanceof Error ? e.message : String(e), tone: 'error' }),
+              )
+            },
+          }))
+      },
+    })
+  }
 
   const rail = (
     <ErrorBoundary label="Bots">
@@ -275,8 +504,9 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
       bots={bots}
       selected={selected}
       onSelect={(n) => {
-        setSelected(n)
-        setRailOverlay(false)
+        selectBot(n)
+        // escolher um bot na rail leva ao chat dele
+        if (view !== 'chat') setView('chat')
       }}
       loading={botsLoading}
       error={railError}
@@ -296,6 +526,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   const dock = (
     <ErrorBoundary label="Dock">
     <DockPane
+      rpc={rpc}
       tab={prefs.dockTab}
       onTabChange={(id) => setPrefs({ dockTab: id })}
       cards={regions.dock}
@@ -320,6 +551,9 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
         railOpen={narrow ? railOverlay : prefs.railOpen}
         dockOpen={narrow ? dockOverlay : prefs.dockOpen}
         focus={focus}
+        view={view}
+        onView={setView}
+        swarm={swarmBadge}
         onOpenPalette={() => setPalette(true)}
         onToggleRail={toggleRail}
         onToggleDock={toggleDock}
@@ -377,10 +611,29 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
                 disabled={!freeLayout}
               />
               <Panel id="chat" minSize={SIZES.chatMin}>
-                <div className="h-full w-full min-h-0 min-w-0">
-                  <ErrorBoundary label="Chat">
-                    <ChatPane rpc={rpc} bot={bot} connState={connState} />
-                  </ErrorBoundary>
+                {/* Área central: views empilhadas. Chat fica sempre montado (stream não cai);
+                    as outras montam na 1ª visita e ficam vivas escondidas (useViewActive). */}
+                <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-void">
+                  <ViewSlot id="chat" active={view === 'chat'} keepMounted>
+                    <ErrorBoundary label="Chat">
+                      <ChatPane rpc={rpc} bot={bot} connState={connState} />
+                    </ErrorBoundary>
+                  </ViewSlot>
+                  <ViewSlot id="swarm" active={view === 'swarm'}>
+                    <ErrorBoundary label="Swarm">
+                      <SwarmView rpc={rpc} />
+                    </ErrorBoundary>
+                  </ViewSlot>
+                  <ViewSlot id="ops" active={view === 'ops'}>
+                    <ErrorBoundary label="Ops">
+                      <OpsView rpc={rpc} />
+                    </ErrorBoundary>
+                  </ViewSlot>
+                  <ViewSlot id="transcrever" active={view === 'transcrever'}>
+                    <ErrorBoundary label="Transcrever">
+                      <TranscriberView />
+                    </ErrorBoundary>
+                  </ViewSlot>
                 </div>
               </Panel>
               <ResizeHandle
@@ -443,7 +696,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
 
       {palette && (
         <ErrorBoundary label="Paleta">
-          <CommandPalette items={paletteItems} onClose={() => setPalette(false)} />
+          <CommandPalette items={paletteItems} sources={paletteSources} onClose={() => setPalette(false)} />
         </ErrorBoundary>
       )}
       {settings && (
@@ -460,16 +713,23 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
         />
         </ErrorBoundary>
       )}
+      <ErrorBoundary label="Toasts" compact>
+        <Toaster />
+      </ErrorBoundary>
     </div>
   )
 }
 
 function Drawer({ side, onClose, children }: { side: 'left' | 'right'; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="no-drag absolute inset-0 z-30 flex bg-void/50" onMouseDown={onClose}>
+    <div
+      className="no-drag hc-scrim absolute inset-0 z-30 flex"
+      onMouseDown={onClose}
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
       <div
-        className={`h-full w-[min(360px,85%)] shadow-2xl ${
-          side === 'left' ? 'border-r' : 'ml-auto border-l'
+        className={`h-full w-[min(360px,85%)] shadow-[var(--hc-shadow-3)] ${
+          side === 'left' ? 'hc-slide-left border-r' : 'hc-slide-right ml-auto border-l'
         } border-edge2`}
         onMouseDown={(e) => e.stopPropagation()}
       >
