@@ -25,6 +25,7 @@ type Item =
       durationMs?: number
       text?: string
     }
+  | { k: 'task'; key: string; taskId: string; text: string; kind?: string; tokens?: number; tools?: number; durationMs?: number; done?: boolean }
   | { k: 'other'; key: string; label: string; raw: unknown }
 
 function asArr(v: unknown): Block[] {
@@ -59,6 +60,29 @@ export function buildItems(lines: SwarmEventLine[]): Item[] {
           tools: Array.isArray(ev.tools) ? ev.tools.length : undefined,
           session: typeof ev.session_id === 'string' ? ev.session_id : undefined,
         })
+      } else if (ev.subtype === 'task_started' || ev.subtype === 'task_progress' || ev.subtype === 'task_notification') {
+        // Workflow/subagentes em background do Claude Code: uma linha por fase,
+        // progresso consecutivo da mesma fase atualiza a linha em vez de repetir.
+        const taskId = String(ev.task_id ?? '')
+        const usage = (ev.usage ?? {}) as Record<string, unknown>
+        const text =
+          ev.subtype === 'task_started'
+            ? `${ev.task_type === 'local_workflow' ? 'workflow' : 'tarefa'} ${String(ev.workflow_name ?? '')} iniciado — ${String(ev.description ?? '')}`
+            : String(ev.description ?? ev.summary ?? 'progresso')
+        const item = {
+          k: 'task' as const,
+          key: `k${i}`,
+          taskId,
+          text,
+          kind: typeof ev.task_type === 'string' ? ev.task_type : undefined,
+          tokens: typeof usage.total_tokens === 'number' ? usage.total_tokens : undefined,
+          tools: typeof usage.tool_uses === 'number' ? usage.tool_uses : undefined,
+          durationMs: typeof usage.duration_ms === 'number' ? usage.duration_ms : undefined,
+          done: ev.subtype === 'task_notification',
+        }
+        const last = out[out.length - 1]
+        if (last && last.k === 'task' && last.taskId === taskId && last.text === text) out[out.length - 1] = { ...item, key: last.key }
+        else out.push(item)
       } else out.push({ k: 'other', key: `s${i}`, label: `system · ${String(ev.subtype ?? '')}`, raw: ev })
       return
     }
@@ -212,6 +236,16 @@ const ItemView = memo(function ItemView({ it, compact }: { it: Item; compact: bo
               <Markdown text={it.text} />
             </div>
           )}
+        </div>
+      )
+    case 'task':
+      return (
+        <div className="hc-fade-in flex items-center gap-2 rounded border border-cyanic/30 bg-cyanic/5 px-2 py-1 text-[11px]">
+          <span className={it.done ? 'text-phos' : 'hc-pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-cyanic'}>{it.done ? '✓' : ''}</span>
+          <span className="min-w-0 flex-1 truncate text-cyanic">{it.text}</span>
+          {it.tools != null && <span className="shrink-0 text-faint">{it.tools} tools</span>}
+          {it.tokens != null && <span className="shrink-0 text-faint">{Math.round(it.tokens / 1000)}k tok</span>}
+          {it.durationMs != null && <span className="shrink-0 tabular-nums text-faint">{fmtDuration(it.durationMs)}</span>}
         </div>
       )
     default:

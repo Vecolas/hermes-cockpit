@@ -250,6 +250,11 @@ function termLines(items: Item[]): { text: string; cls: string }[] {
         const first = it.result.text.split('\n').find(Boolean)
         if (first) out.push({ text: `  │ ${first}`, cls: it.result.isError ? 'text-alert' : 'text-faint' })
       }
+    } else if (it.k === 'task') {
+      const meta = [it.tools != null ? `${it.tools} tools` : '', it.tokens != null ? `${Math.round(it.tokens / 1000)}k tok` : '', it.durationMs != null ? fmtDuration(it.durationMs) : '']
+        .filter(Boolean)
+        .join(' · ')
+      out.push({ text: `${it.done ? '✓' : '⟳'} ${it.text}${meta ? `  [${meta}]` : ''}`, cls: it.done ? 'text-phos' : 'text-amber' })
     } else if (it.k === 'result')
       out.push({ text: `■ ${it.ok ? 'concluída' : it.subtype ?? 'erro'} · ${it.turns ?? '?'} turnos · ${fmtCost(it.cost)}`, cls: it.ok ? 'text-phos' : 'text-alert' })
   }

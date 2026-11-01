@@ -22,10 +22,19 @@ function summarize(input) {
   return typeof v === 'string' ? clip(v.replace(/\s+/g, ' '), 140) : clip(JSON.stringify(o), 140)
 }
 
+let lastTask = ''
+
 function render(ev) {
   if (!ev || typeof ev !== 'object') return
   if (ev.type === 'system' && ev.subtype === 'init') {
     out(`${C.dim}── init · ${ev.model ?? '?'} · perm ${ev.permissionMode ?? '?'} · ${ev.cwd ?? ''}${C.reset}`)
+  } else if (ev.type === 'system' && (ev.subtype === 'task_started' || ev.subtype === 'task_progress' || ev.subtype === 'task_notification')) {
+    const text = ev.subtype === 'task_started' ? `workflow ${ev.workflow_name ?? ''} iniciado — ${ev.description ?? ''}` : String(ev.description ?? ev.summary ?? '')
+    if (text === lastTask) return
+    lastTask = text
+    const u = ev.usage ?? {}
+    const meta = [u.tool_uses != null ? `${u.tool_uses} tools` : '', u.total_tokens != null ? `${Math.round(u.total_tokens / 1000)}k tok` : ''].filter(Boolean).join(' · ')
+    out(`${C.amber}⟳ ${text}${C.reset}${meta ? ` ${C.dim}[${meta}]${C.reset}` : ''}`)
   } else if (ev.type === 'assistant') {
     for (const b of ev.message?.content ?? []) {
       if (b.type === 'text' && b.text?.trim()) out(b.text.trim())
