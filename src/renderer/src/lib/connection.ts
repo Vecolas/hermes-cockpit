@@ -6,7 +6,8 @@ export type Connection =
 
 const STORAGE_KEY = 'hermes-cockpit.backend'
 
-// Electron: o main process spawna `hermes serve` e entrega URL + token.
+// Electron: o main process spawna `hermes serve` e entrega a info MASCARADA
+// (token '' e wsUrl sem ?token=) — WS e REST passam pelo proxy IPC do main.
 // Navegador (dev:web): sem bridge — usa conexão manual salva em localStorage.
 export async function connectBackend(): Promise<Connection> {
   if (window.hermes) {
@@ -39,13 +40,17 @@ export function saveManual(baseUrl: string, token: string): void {
 }
 
 // REST do plugin cockpit. No Electron passa pelo proxy do main (sem CORS);
-// no navegador vai direto com ?token= (depende do CORS do serve — modo degradado).
+// no navegador manda o header x-hermes-session-token (o serve rejeita REST só
+// com ?token=). Limitação: o serve responde 401 ao preflight CORS (auth roda
+// antes do CORS), então cross-origin direto só funciona atrás de um proxy
+// same-origin no dev server — modo degradado.
 export async function cockpitApi<T>(conn: Connection, path: string): Promise<T> {
   if (conn.mode === 'electron' && window.hermes) {
     return (await window.hermes.api(path)) as T
   }
-  const sep = path.includes('?') ? '&' : '?'
-  const res = await fetch(`${conn.info.baseUrl}${path}${sep}token=${encodeURIComponent(conn.info.token)}`)
+  const res = await fetch(`${conn.info.baseUrl}${path}`, {
+    headers: { 'x-hermes-session-token': conn.info.token },
+  })
   if (!res.ok) throw new Error(`${res.status}`)
   return (await res.json()) as T
 }
