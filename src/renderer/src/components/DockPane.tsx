@@ -1,41 +1,28 @@
-import { useRef } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Group, Panel, useDefaultLayout, usePanelRef } from 'react-resizable-panels'
 import { GROUP_IDS, SIZES, safeStorage } from '../lib/layout'
+import type { HermesRpc } from '../lib/rpc'
+import { DOCK_TAB_EVENT } from '../lib/devtools'
 import { RegionView } from './panels/RegionView'
 import { ResizeHandle, useCollapseSync } from './layout/ResizeHandle'
+import { SwarmDockTab } from './swarm/SwarmDockTab'
+import { WorkspacePicker } from './devtools/WorkspacePicker'
+import { TerminalTab } from './devtools/TerminalTab'
+import { GitTab } from './devtools/GitTab'
+import { FilesTab } from './devtools/FilesTab'
+import { PreviewTab } from './devtools/PreviewTab'
+import { ScreenTab } from './devtools/ScreenTab'
 
 export const DOCK_TABS = [
-  {
-    id: 'terminal',
-    label: 'Terminal',
-    hint: 'xterm.js sobre o endpoint /api/pty do serve — mesma técnica do dashboard oficial.',
-    fase: 'P2-12',
-  },
-  {
-    id: 'diff',
-    label: 'Diff · Git',
-    hint: 'git_probe do backend + diff por arquivo, com Revisar/Commit.',
-    fase: 'P2-13',
-  },
-  {
-    id: 'preview',
-    label: 'Preview',
-    hint: 'preview do que o bot está construindo (URL local / build).',
-    fase: 'P2-14',
-  },
-  {
-    id: 'arquivos',
-    label: 'Arquivos',
-    hint: 'navegador de arquivos do workspace da sessão ativa.',
-    fase: 'P2',
-  },
-  {
-    id: 'tela',
-    label: 'Tela Mac',
-    hint: 'screenshot ao vivo da tela do Mac (computer use / operador bounded).',
-    fase: 'P2-14',
-  },
+  { id: 'terminal', label: 'Terminal', hint: 'zsh no workspace ou hermes --tui (xterm.js)', usesWorkspace: true },
+  { id: 'diff', label: 'Diff · Git', hint: 'alterações, diff por arquivo, branches e worktrees', usesWorkspace: true },
+  { id: 'arquivos', label: 'Arquivos', hint: 'navegador de arquivos do workspace', usesWorkspace: true },
+  { id: 'preview', label: 'Preview', hint: 'app local em iframe', usesWorkspace: false },
+  { id: 'swarm', label: 'Swarm', hint: 'execuções do swarm', usesWorkspace: false },
+  { id: 'tela', label: 'Tela Mac', hint: 'screenshot da tela do Mac', usesWorkspace: false },
 ] as const
+
+export type DockTabId = (typeof DOCK_TABS)[number]['id']
 
 interface Props {
   tab: string
@@ -45,11 +32,15 @@ interface Props {
   onCardsChange: (ids: string[]) => void
   cardsOpen: boolean
   onCardsOpenChange: (open: boolean) => void
+  /** conexão RPC (Swarm, profiles do Terminal); opcional */
+  rpc?: HermesRpc | null
 }
 
-// Dock lateral: abas (P2 ainda — conteúdo honesto "em breve") em cima e cards
-// do registry embaixo, com alça vertical redimensionável/colapsável.
-export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, onCardsOpenChange }: Props) {
+// Dock lateral: seletor de workspace + abas (Terminal, Diff · Git, Arquivos,
+// Preview, Swarm, Tela Mac) em cima e cards do registry embaixo, com alça
+// vertical redimensionável/colapsável. Abas montam na 1ª visita e ficam
+// montadas (ocultas) ao trocar — terminal não perde a sessão.
+export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, onCardsOpenChange, rpc = null }: Props) {
   const current = DOCK_TABS.find((t) => t.id === tab) ?? DOCK_TABS[0]
   const cardsRef = usePanelRef()
   const layout = useDefaultLayout({
@@ -59,14 +50,65 @@ export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, on
   })
   const wantOpen = useRef(cardsOpen)
   wantOpen.current = cardsOpen
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set([current.id]))
 
   // Sincroniza preferência (botão/atalho) → painel.
   useCollapseSync(cardsRef, cardsOpen)
 
+  useEffect(() => {
+    if (!visited.has(current.id)) setVisited((v) => new Set(v).add(current.id))
+  }, [current.id, visited])
+
+  // Pedidos de troca de aba vindos de outros módulos (ex.: DiffCard → 'diff').
+  const changeRef = useRef(onTabChange)
+  changeRef.current = onTabChange
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<unknown>).detail
+      if (typeof id === 'string' && DOCK_TABS.some((t) => t.id === id)) changeRef.current(id)
+    }
+    window.addEventListener(DOCK_TAB_EVENT, on)
+    return () => window.removeEventListener(DOCK_TAB_EVENT, on)
+  }, [])
+
+  const body = (id: DockTabId, active: boolean): ReactNode => {
+    switch (id) {
+      case 'terminal':
+        return <TerminalTab rpc={rpc} active={active} />
+      case 'diff':
+        return <GitTab active={active} />
+      case 'arquivos':
+        return <FilesTab active={active} />
+      case 'preview':
+        return <PreviewTab active={active} />
+      case 'swarm':
+        return <SwarmDockTab rpc={rpc} />
+      case 'tela':
+        return <ScreenTab active={active} />
+    }
+  }
 
   return (
     <aside className="flex h-full min-w-0 flex-col bg-panel">
-      <div className="flex shrink-0 flex-wrap gap-1 border-b border-edge px-2 pt-2" role="tablist">
+      <div
+        className="flex shrink-0 flex-wrap gap-1 border-b border-edge px-2 pt-2"
+        role="tablist"
+        aria-label="Abas do dock"
+        onKeyDown={(e) => {
+          // ←/→/Home/End movem a aba selecionada (padrão de ui/Tabs)
+          const ids = DOCK_TABS.map((t) => t.id)
+          const i = ids.indexOf(current.id)
+          let n = -1
+          if (e.key === 'ArrowRight') n = (i + 1) % ids.length
+          else if (e.key === 'ArrowLeft') n = (i - 1 + ids.length) % ids.length
+          else if (e.key === 'Home') n = 0
+          else if (e.key === 'End') n = ids.length - 1
+          if (n < 0) return
+          e.preventDefault()
+          onTabChange(ids[n])
+          e.currentTarget.querySelector<HTMLElement>(`[data-tab-id="${ids[n]}"]`)?.focus()
+        }}
+      >
         {DOCK_TABS.map((t) => {
           const on = t.id === current.id
           return (
@@ -74,7 +116,9 @@ export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, on
               key={t.id}
               type="button"
               role="tab"
+              data-tab-id={t.id}
               aria-selected={on}
+              tabIndex={on ? 0 : -1}
               onClick={() => onTabChange(t.id)}
               className={`-mb-px rounded-t-md border px-3 py-1.5 text-[11px] transition-colors ${
                 on
@@ -103,12 +147,28 @@ export function DockPane({ tab, onTabChange, cards, onCardsChange, cardsOpen, on
         }}
       >
         <Panel id="dock-tabs" minSize={SIZES.dockTabsMin}>
-          <div className="flex h-full flex-col items-center justify-center gap-3 overflow-auto px-6 text-center">
-            <div className="label">{current.label}</div>
-            <p className="max-w-xs text-[12px] leading-relaxed text-dim">{current.hint}</p>
-            <span className="rounded border border-edge2 px-2 py-1 text-[10px] text-faint">
-              em breve ({current.fase})
-            </span>
+          <div className="flex h-full min-h-0 flex-col">
+            {current.usesWorkspace && (
+              <div className="flex shrink-0 items-center gap-2 border-b border-edge px-2 py-1.5">
+                <WorkspacePicker />
+              </div>
+            )}
+            <div className="relative min-h-0 flex-1">
+              {DOCK_TABS.filter((t) => visited.has(t.id) || t.id === current.id).map((t) => {
+                const on = t.id === current.id
+                return (
+                  <div
+                    key={t.id}
+                    role="tabpanel"
+                    aria-label={t.label}
+                    hidden={!on}
+                    className={on ? 'hc-fade-in absolute inset-0 flex min-h-0 flex-col' : 'hidden'}
+                  >
+                    {body(t.id, on)}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </Panel>
         <ResizeHandle
