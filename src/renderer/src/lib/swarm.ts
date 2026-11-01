@@ -220,7 +220,7 @@ function notifyNewApprovals(list: Approval[], runs: RunMeta[]): void {
       if (seenApprovals.has(a.id)) continue
       const run = runs.find((r) => r.id === a.runId)
       toast({
-        title: `Aprovação pendente · ${a.toolName}`,
+        title: a.toolName === 'AskUserQuestion' ? 'Claude Code pergunta — responda no Swarm' : `Aprovação pendente · ${a.toolName}`,
         detail: run ? `${runHandle(run)} — ${run.title || run.task}`.slice(0, 140) : a.runId,
         tone: 'warn',
         durationMs: 8000,
