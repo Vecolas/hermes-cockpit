@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ChatItem } from '../../lib/chat-store'
+import { Markdown } from './Markdown'
 
 interface Props {
   items: ChatItem[]
@@ -82,8 +83,8 @@ function Row({ item, verbose }: { item: ChatItem; verbose: boolean }) {
             </details>
           )}
           {(item.text || item.streaming) && (
-            <div className="whitespace-pre-wrap break-words leading-relaxed text-ink/95">
-              {item.text}
+            <div className="break-words leading-relaxed text-ink/95">
+              <Markdown text={item.text} />
               {item.streaming && <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-amber align-middle" />}
             </div>
           )}

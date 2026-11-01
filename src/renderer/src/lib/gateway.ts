@@ -329,11 +329,13 @@ export function commandsCatalog(rpc: HermesRpc, opts: { profile?: string; sessio
 export function flattenCatalog(cat: CommandsCatalog | null): SlashCommand[] {
   if (!cat) return []
   const out = new Map<string, SlashCommand>()
-  const skills = cat.skills ?? {}
+  // As chaves de `skills` podem vir com ou sem "/" — normaliza para o nome nu.
+  const skills: Record<string, { usage?: number } | undefined> = {}
+  for (const [k, v] of Object.entries(cat.skills ?? {})) skills[k.replace(/^\/+/, '')] = v
   for (const pair of cat.pairs ?? []) {
     const [rawName, desc] = pair
     if (!rawName) continue
-    const name = rawName.startsWith('/') ? rawName : `/${rawName}`
+    const name = `/${rawName.replace(/^\/+/, "")}`
     const bare = name.slice(1)
     const skill = skills[bare]
     out.set(name, {
