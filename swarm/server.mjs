@@ -29,11 +29,12 @@ serveMcp({
           cwd: str('Caminho absoluto do repositório/diretório de trabalho.'),
           title: str('Título curto para o cockpit (opcional).'),
           model: str('Modelo/alias do Claude Code, ex. sonnet, opus (opcional).'),
+          permissionMode: { type: 'string', enum: ['manual', 'auto', 'acceptEdits', 'bypass'], description: 'Permissões: manual (aprovação no cockpit), auto (classificador do Claude Code), acceptEdits, bypass. Padrão: config do cockpit.' },
         },
         required: ['task', 'cwd'],
       },
-      handler: ({ task, cwd, title, model }) => {
-        const m = createRun({ task, cwd, title, model, requestedBy: requestedBy() })
+      handler: ({ task, cwd, title, model, permissionMode }) => {
+        const m = createRun({ task, cwd, title, model, permissionMode, requestedBy: requestedBy() })
         return { runId: m.id, status: m.status }
       },
     },
@@ -53,11 +54,12 @@ serveMcp({
           },
           cwd: str('cwd padrão para tarefas sem cwd próprio.'),
           model: str('Modelo padrão (opcional).'),
+          permissionMode: { type: 'string', enum: ['manual', 'auto', 'acceptEdits', 'bypass'], description: 'Permissões: manual (aprovação no cockpit), auto (classificador do Claude Code), acceptEdits, bypass. Padrão: config do cockpit.' },
         },
         required: ['tasks'],
       },
-      handler: ({ tasks, cwd, model }) => {
-        const r = spawnMany({ tasks, cwd, model, requestedBy: requestedBy() })
+      handler: ({ tasks, cwd, model, permissionMode }) => {
+        const r = spawnMany({ tasks, cwd, model, permissionMode, requestedBy: requestedBy() })
         return { groupId: r.groupId, runIds: r.runIds }
       },
     },

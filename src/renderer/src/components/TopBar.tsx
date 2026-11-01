@@ -9,6 +9,8 @@ import { IconButton } from './ui/IconButton'
 import { Kbd } from './ui/Kbd'
 import { Tabs, type TabItem } from './ui/Tabs'
 import { cx } from './ui/cx'
+import { setAutoMode, useAutoMode } from '../lib/automode'
+import { openChatWindow } from '../lib/windows'
 
 type Tone = 'ok' | 'warn' | 'off' | 'bad'
 
@@ -165,6 +167,10 @@ export function TopBar(p: Props) {
       </div>
 
       <div className="flex shrink-0 items-center gap-0.5">
+        <AutoToggle />
+        <IconButton label="Nova janela" onClick={() => openChatWindow()} title="nova janela de chat (⌘⇧N)">
+          ⧉
+        </IconButton>
         {!p.narrow && !p.focus && (
           <IconButton label="Rail" active={p.railOpen} onClick={p.onToggleRail} title="alternar rail (⌘B)">
             ◧
@@ -224,5 +230,24 @@ function Pill({ tone, tip, children }: { tone: Tone; tip: string; children: Reac
       <span className={`h-1.5 w-1.5 rounded-full transition-colors duration-[var(--hc-dur-3)] ${dot}`} aria-hidden />
       <span className="hc-pill-label">{children}</span>
     </span>
+  )
+}
+
+/** Auto mode global: Hermes approvals smart + swarm --permission-mode auto. */
+function AutoToggle() {
+  const on = useAutoMode()
+  return (
+    <button
+      type="button"
+      onClick={() => void setAutoMode(!on)}
+      title={on ? 'Auto mode LIGADO — Hermes aprova via guardian (smart) e o swarm usa --permission-mode auto. Clique para desligar.' : 'Auto mode desligado — aprovações manuais no cockpit. Clique para ligar em tudo.'}
+      className={cx(
+        'no-drag mr-1 flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] transition-all',
+        on ? 'border-phos/60 bg-phos/10 text-phos shadow-[0_0_14px_-4px_var(--color-phos)]' : 'border-edge2 text-faint hover:border-edge2 hover:text-dim',
+      )}
+    >
+      <span className={cx('h-1.5 w-1.5 rounded-full', on ? 'hc-pulse-dot bg-phos' : 'bg-faint')} />
+      auto
+    </button>
   )
 }

@@ -13,6 +13,7 @@ export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'done' | 'er
 
 export interface RunMeta {
   id: string
+  permissionMode?: 'manual' | 'auto' | 'acceptEdits' | 'bypass'
   groupId?: string
   title: string
   task: string
@@ -66,6 +67,7 @@ export interface SpawnInput {
   title?: string
   model?: string
   groupId?: string
+  permissionMode?: 'manual' | 'auto' | 'acceptEdits' | 'bypass'
 }
 
 // ── wrappers IPC ────────────────────────────────────────────────────────────
@@ -82,6 +84,9 @@ export const swarmApi = {
   spawn: (input: SpawnInput) => invoke<RunMeta>('swarm:spawn', input),
   send: (runId: string, message: string) => invoke<RunMeta>('swarm:send', runId, message),
   cleanup: (runId: string) => invoke<void>('swarm:cleanup', runId),
+  config: () => invoke<{ defaultPermissionMode: SpawnInput['permissionMode'] }>('swarm:config'),
+  setConfig: (defaultPermissionMode: NonNullable<SpawnInput['permissionMode']>) =>
+    invoke<{ defaultPermissionMode: string }>('swarm:setConfig', { defaultPermissionMode }),
 }
 
 // ── helpers de apresentação ─────────────────────────────────────────────────

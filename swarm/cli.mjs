@@ -7,6 +7,7 @@
 //   node cli.mjs cancel <runId>
 //   node cli.mjs version
 import { cancelRun, claudeVersion, cleanupRun, createRun, sendRun } from './lib/runs.mjs'
+import { readSwarmConfig, writeSwarmConfig } from './lib/state.mjs'
 
 const [cmd, a1, a2] = process.argv.slice(2)
 const cockpit = { via: 'cockpit' }
@@ -15,7 +16,7 @@ function run() {
   switch (cmd) {
     case 'spawn': {
       const o = JSON.parse(a1 || '{}')
-      return createRun({ task: o.task, cwd: o.cwd, title: o.title, model: o.model, groupId: o.groupId, requestedBy: cockpit })
+      return createRun({ task: o.task, cwd: o.cwd, title: o.title, model: o.model, groupId: o.groupId, permissionMode: o.permissionMode, requestedBy: cockpit })
     }
     case 'send':
       return sendRun(a1, a2, cockpit)
@@ -23,6 +24,10 @@ function run() {
       return cleanupRun(a1)
     case 'cancel':
       return cancelRun(a1)
+    case 'config-get':
+      return readSwarmConfig()
+    case 'config-set':
+      return writeSwarmConfig(JSON.parse(a1 || '{}'))
     case 'version':
       return { claudeVersion: claudeVersion() }
     default:

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '../../lib/ipc'
-import { errMsg, newGroupId, refreshSwarm, swarmApi, type RunMeta } from '../../lib/swarm'
+import { SWARM_PERM_LABEL } from '../../lib/automode'
+import { errMsg, newGroupId, refreshSwarm, swarmApi, type RunMeta, type SpawnInput } from '../../lib/swarm'
 import { toast } from '../../lib/toast'
 import { Btn } from './ui'
 
@@ -30,6 +31,10 @@ export function SpawnForm({ onDone, onCancel }: { onDone: (runs: RunMeta[]) => v
   const [cwd, setCwd] = useState(readLastCwd)
   const [title, setTitle] = useState('')
   const [model, setModel] = useState('')
+  const [perm, setPerm] = useState<NonNullable<SpawnInput['permissionMode']>>('manual')
+  useEffect(() => {
+    swarmApi.config().then((c) => c?.defaultPermissionMode && setPerm(c.defaultPermissionMode), () => {})
+  }, [])
   const [perLine, setPerLine] = useState(true)
   const [repos, setRepos] = useState<RepoInfo[] | null>(null)
   const [busy, setBusy] = useState(false)
@@ -76,6 +81,7 @@ export function SpawnForm({ onDone, onCancel }: { onDone: (runs: RunMeta[]) => v
             title: (multi ? (title.trim() ? `${title.trim()} #${i + 1}` : t.slice(0, 60)) : title.trim()) || undefined,
             model: model.trim() || undefined,
             groupId,
+            permissionMode: perm,
           }),
         )
       } catch (e) {
@@ -165,6 +171,18 @@ export function SpawnForm({ onDone, onCancel }: { onDone: (runs: RunMeta[]) => v
           placeholder="modelo (padrão)"
           className="w-28 rounded border border-edge2 bg-void px-2 py-1 text-[11px] text-ink outline-none placeholder:text-faint focus:border-amber/60"
         />
+        <select
+          value={perm}
+          onChange={(e) => setPerm(e.target.value as NonNullable<SpawnInput['permissionMode']>)}
+          title="permissões da run"
+          className={`rounded border bg-void px-1.5 py-1 text-[11px] outline-none ${perm === 'bypass' ? 'border-alert/60 text-alert' : perm === 'auto' ? 'border-phos/50 text-phos' : 'border-edge2 text-dim'}`}
+        >
+          {(Object.keys(SWARM_PERM_LABEL) as Array<keyof typeof SWARM_PERM_LABEL>).map((k) => (
+            <option key={k} value={k}>
+              {SWARM_PERM_LABEL[k]}
+            </option>
+          ))}
+        </select>
         <datalist id="hc-swarm-models">
           {MODELS.map((m) => (
             <option key={m} value={m} />

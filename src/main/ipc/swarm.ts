@@ -359,7 +359,11 @@ export function register(): void {
     decide(approvalId, decision, reason, updatedInput),
   )
   handle('swarm:cancel', (runId: string) => cancel(runId))
-  handle('swarm:spawn', (opts: { task: string; cwd: string; title?: string; model?: string; groupId?: string }) => {
+  handle('swarm:config', () => runCli<{ defaultPermissionMode: string }>(['config-get']))
+  handle('swarm:setConfig', (patch: { defaultPermissionMode?: string }) =>
+    runCli<{ defaultPermissionMode: string }>(['config-set', JSON.stringify({ defaultPermissionMode: patch?.defaultPermissionMode })]),
+  )
+  handle('swarm:spawn', (opts: { task: string; cwd: string; title?: string; model?: string; groupId?: string; permissionMode?: string }) => {
     if (!opts || typeof opts.task !== 'string' || typeof opts.cwd !== 'string') throw new Error('task e cwd obrigatórios')
     return runCli<RunMeta>(['spawn', JSON.stringify(opts)])
   })

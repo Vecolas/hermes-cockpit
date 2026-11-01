@@ -12,6 +12,8 @@ interface Props {
   quick: SlashCommand[]
   footerLeft?: string
   footerRight?: string
+  /** controles extras no rodapé (ex.: chip de modo de aprovação) */
+  footerExtra?: React.ReactNode
   onSend: (text: string) => Promise<boolean>
   onCancel: () => void
   /** texto injetado de fora (prefill de slash); `nonce` muda a cada injeção */
@@ -29,6 +31,7 @@ export function Composer({
   quick,
   footerLeft,
   footerRight,
+  footerExtra,
   onSend,
   onCancel,
   prefill,
@@ -224,6 +227,7 @@ export function Composer({
             </button>
           ))}
           <div className="ml-auto flex items-center gap-2">
+            {footerExtra}
             {footerRight && <span className="truncate text-[11px] text-faint">{footerRight}</span>}
             {dictation.available && (
               <button

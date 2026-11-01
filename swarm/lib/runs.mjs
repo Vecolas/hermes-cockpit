@@ -21,6 +21,7 @@ import {
   runDir,
   writeMeta,
   eventsPath,
+  normalizePermissionMode,
 } from './state.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -117,7 +118,7 @@ export function runnerEnv() {
  * Cria a run (meta queued) e spawna o runner detached. O runner cria o
  * worktree e assume a escrita de meta.json daí em diante.
  */
-export function createRun({ task, cwd, title, model, groupId, requestedBy, resumeFrom }) {
+export function createRun({ task, cwd, title, model, groupId, requestedBy, resumeFrom, permissionMode }) {
   if (typeof task !== 'string' || !task.trim()) throw new Error('task obrigatória')
   ensureDirs()
   const id = newRunId()
@@ -132,6 +133,7 @@ export function createRun({ task, cwd, title, model, groupId, requestedBy, resum
     repo,
     cwd: repo,
     ...(model ? { model: String(model) } : {}),
+    permissionMode: normalizePermissionMode(permissionMode ?? resumeFrom?.permissionMode),
     status: 'queued',
     requestedBy: requestedBy || { via: 'cockpit' },
     createdAt: nowIso(),
@@ -159,7 +161,7 @@ export function createRun({ task, cwd, title, model, groupId, requestedBy, resum
   return { ...meta, pid }
 }
 
-export function spawnMany({ tasks, cwd, model, requestedBy }) {
+export function spawnMany({ tasks, cwd, model, requestedBy, permissionMode }) {
   if (!Array.isArray(tasks) || tasks.length === 0) throw new Error('tasks vazio')
   if (tasks.length > 8) throw new Error('máximo de 8 tarefas por grupo')
   const groupId = newGroupId()
@@ -171,6 +173,7 @@ export function spawnMany({ tasks, cwd, model, requestedBy }) {
       model: t.model || model,
       groupId,
       requestedBy,
+      permissionMode: t.permissionMode || permissionMode,
     }),
   )
   return { groupId, runIds: runs.map((r) => r.id), runs }

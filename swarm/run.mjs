@@ -227,6 +227,9 @@ function main() {
   const wanted = rawSources === 'all' ? ['user', 'local'] : rawSources.split(',').map((x) => x.trim())
   const sources = wanted.filter((x) => x === 'user' || x === 'local')
   args.push(`--setting-sources=${sources.join(',')}`)
+  // Modo de permissão (meta.permissionMode, ver state.mjs). 'manual' = padrão do CLI.
+  const PM = { auto: 'auto', acceptEdits: 'acceptEdits', bypass: 'bypassPermissions' }
+  if (PM[meta.permissionMode]) args.push('--permission-mode', PM[meta.permissionMode])
   if (meta.model) args.push('--model', meta.model)
   if (meta.resumeSessionId) args.push('--resume', meta.resumeSessionId)
   args.push('--', meta.task)

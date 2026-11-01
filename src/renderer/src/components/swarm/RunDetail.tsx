@@ -88,6 +88,9 @@ export function RunDetail({
           <span title={run.repo}>{repoName(run.repo)}</span>
           {run.branch && <span className="text-dim">⎇ {run.branch}</span>}
           {run.model && <span>{run.model}</span>}
+          {run.permissionMode && run.permissionMode !== 'manual' && (
+            <span className={run.permissionMode === 'bypass' ? 'text-alert' : 'text-phos'}>perm: {run.permissionMode}</span>
+          )}
           <span>{fmtDuration(runElapsedMs(run, now))}</span>
           {run.numTurns != null && <span>{run.numTurns} turnos</span>}
           <span>{fmtCost(run.costUsd)}</span>

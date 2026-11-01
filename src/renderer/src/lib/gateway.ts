@@ -374,6 +374,11 @@ export function execSlash(rpc: HermesRpc, sessionId: string, command: string): P
   return rpc.call<SlashExecResult>('slash.exec', { session_id: sessionId, command: command.replace(/^\/+/, '') })
 }
 
+/** approvals.mode do Hermes: manual | smart (auto) | off (yolo). Grava na config do profile. */
+export function setApprovalMode(rpc: HermesRpc, sessionId: string, mode: 'manual' | 'smart' | 'off'): Promise<ConfigSetResult> {
+  return rpc.call<ConfigSetResult>('config.set', { session_id: sessionId, key: 'approvals.mode', value: mode })
+}
+
 /** Fallback do desktop oficial quando slash.exec falha (skill/send/alias). */
 export function commandDispatch(rpc: HermesRpc, sessionId: string, name: string, arg: string): Promise<SlashExecResult> {
   return rpc.call<SlashExecResult>('command.dispatch', { session_id: sessionId, name, arg })

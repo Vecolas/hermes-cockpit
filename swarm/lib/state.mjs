@@ -169,3 +169,34 @@ export function decideApproval(id, decision, reason, updatedInput) {
   writeJsonAtomic(file, next)
   return next
 }
+
+// ── config do swarm (modo de permissão padrão) ──────────────────────────────
+// manual: só leitura/edição no worktree liberadas, resto vira card no cockpit
+// auto:   --permission-mode auto (classificador do Claude Code decide; o que
+//         ele escalar ainda vira card)
+// acceptEdits: edições liberadas em qualquer lugar do cwd; resto vira card
+// bypass: --permission-mode bypassPermissions (sem aprovação nenhuma)
+export const PERMISSION_MODES = ['manual', 'auto', 'acceptEdits', 'bypass']
+export const CONFIG_PATH = join(STATE_DIR, 'config.json')
+
+export function readSwarmConfig() {
+  try {
+    const c = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'))
+    return { defaultPermissionMode: PERMISSION_MODES.includes(c.defaultPermissionMode) ? c.defaultPermissionMode : 'manual' }
+  } catch {
+    return { defaultPermissionMode: 'manual' }
+  }
+}
+
+export function writeSwarmConfig(patch) {
+  const cur = readSwarmConfig()
+  const next = { ...cur }
+  if (patch && PERMISSION_MODES.includes(patch.defaultPermissionMode)) next.defaultPermissionMode = patch.defaultPermissionMode
+  mkdirSync(STATE_DIR, { recursive: true })
+  writeFileSync(CONFIG_PATH, JSON.stringify(next, null, 2))
+  return next
+}
+
+export function normalizePermissionMode(m) {
+  return PERMISSION_MODES.includes(m) ? m : readSwarmConfig().defaultPermissionMode
+}
