@@ -43,10 +43,21 @@ export interface HermesWsBridge {
   onState(fn: (id: string, info: WsProxyStateInfo) => void): () => void
 }
 
+export interface ApiInit {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** serializado como JSON pelo main */
+  body?: unknown
+}
+
 export interface HermesBridge {
   backend(): Promise<BackendInfo>
-  api(path: string): Promise<unknown>
+  /** REST do serve via proxy no main (token fica no main). */
+  api(path: string, init?: ApiInit): Promise<unknown>
   ws: HermesWsBridge
+  /** IPC de domínio: canais `swarm:*`, `ops:*`, `storage:*`, `transcriber:*`. */
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>
+  /** Eventos main→renderer dos mesmos domínios; retorna unsubscribe. */
+  on(channel: string, fn: (payload: unknown) => void): () => void
 }
 
 declare global {

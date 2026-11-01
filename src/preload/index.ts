@@ -35,10 +35,30 @@ const ws = {
   },
 }
 
+// Domínios de IPC do cockpit (espelho de DOMAINS em src/main/ipc/index.ts).
+const DOMAIN_RE = /^(swarm|ops|storage|transcriber):[\w.:-]+$/
+
+interface ApiInit {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  body?: unknown
+}
+
 const bridge = {
   backend: () => ipcRenderer.invoke('hermes:backend'),
-  api: (path: string) => ipcRenderer.invoke('hermes:api', path),
+  api: (path: string, init?: ApiInit) => ipcRenderer.invoke('hermes:api', path, init),
   ws,
+  invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
+    if (!DOMAIN_RE.test(channel)) return Promise.reject(new Error(`canal IPC não permitido: ${channel}`))
+    return ipcRenderer.invoke(channel, ...args)
+  },
+  on: (channel: string, fn: (payload: unknown) => void): (() => void) => {
+    if (!DOMAIN_RE.test(channel)) throw new Error(`canal IPC não permitido: ${channel}`)
+    const listener = (_e: IpcRendererEvent, payload: unknown) => fn(payload)
+    ipcRenderer.on(channel, listener)
+    return () => {
+      ipcRenderer.removeListener(channel, listener)
+    }
+  },
 }
 
 contextBridge.exposeInMainWorld('hermes', bridge)

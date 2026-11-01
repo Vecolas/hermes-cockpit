@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "start": "electron-vite preview",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --mac dmg"
+    "dist": "npm run build && electron-builder --mac dmg",
+    "swarm:install": "node swarm/install.mjs"
   },
   "build": {
     "appId": "com.alexandre.hermescockpit",
@@ -30,7 +31,11 @@
         "dmg"
       ],
       "identity": null,
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O Hermes Cockpit usa o microfone para ditado e transcrição local (transcriber).",
+        "NSAudioCaptureUsageDescription": "Captura de áudio do sistema para transcrição local."
+      }
     },
     "dmg": {
       "title": "Hermes Cockpit",
@@ -41,6 +46,8 @@
     }
   },
   "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-resizable-panels": "^4.16.1"

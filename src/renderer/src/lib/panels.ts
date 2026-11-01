@@ -1,16 +1,16 @@
 import type { ComponentType } from 'react'
 import {
   AgendaWidget,
-  DiffWidget,
   InboxWidget,
   QuotaWidget,
   RailQuotaWidget,
   SistemaWidget,
-  SwarmWidget,
   TarefasWidget,
   TimeboxWidget,
   type WidgetProps,
 } from '../components/panels/widgets'
+import { DiffCard } from '../components/devtools/DiffCard'
+import { SwarmCard } from '../components/swarm/SwarmCard'
 
 // Registry de painéis (P1-8). A strip inferior e a área de cards do dock leem
 // daqui; quais painéis aparecem em cada região (e em que ordem) é um layout
@@ -41,8 +41,8 @@ export const PANELS: PanelDef[] = [
   { id: 'quota', titulo: 'Provedores · cota', componente: QuotaWidget, fonte: ['/quota'], refreshMs: 60_000 },
   { id: 'sistema', titulo: 'Sistema · Mac', componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000 },
   { id: 'cota-rail', titulo: 'Provedores · cota (compacto)', componente: RailQuotaWidget, fonte: ['/quota'], refreshMs: 60_000 },
-  { id: 'diff', titulo: 'Diff pendente', componente: DiffWidget, fonte: [], refreshMs: 0 },
-  { id: 'swarm', titulo: 'Execuções do swarm', componente: SwarmWidget, fonte: [], refreshMs: 0 },
+  { id: 'diff', titulo: 'Diff pendente', componente: DiffCard, fonte: ['/api/git/status'], refreshMs: 15_000 },
+  { id: 'swarm', titulo: 'Execuções do swarm', componente: SwarmCard, fonte: ['swarm:list'], refreshMs: 5_000 },
 ]
 
 export const PANEL_BY_ID: Record<string, PanelDef> = Object.fromEntries(PANELS.map((p) => [p.id, p]))

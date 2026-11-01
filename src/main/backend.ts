@@ -163,13 +163,25 @@ function start(): Promise<BackendInfo> {
 
 // Proxy REST pelo main process: evita CORS (o serve não emite Access-Control-*)
 // e mantém o token fora do renderer para REST.
-export async function apiFetch(path: string): Promise<unknown> {
+export interface ApiInit {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+  /** serializado como JSON */
+  body?: unknown
+}
+
+export async function apiFetch(path: string, init: ApiInit = {}): Promise<unknown> {
   if (typeof path !== 'string' || !path.startsWith('/api/') || path.includes('..')) {
     throw new Error(`caminho REST inválido: ${String(path).slice(0, 120)}`)
   }
   const info = await ensureBackend()
+  const method = init.method ?? 'GET'
+  if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new Error(`método inválido: ${method}`)
+  const headers: Record<string, string> = { 'x-hermes-session-token': info.token }
+  if (init.body !== undefined) headers['content-type'] = 'application/json'
   const res = await fetch(`${info.baseUrl}${path}`, {
-    headers: { 'x-hermes-session-token': info.token },
+    method,
+    headers,
+    body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
   })
   const text = await res.text()
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 300)}`)

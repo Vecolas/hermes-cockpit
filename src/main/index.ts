@@ -1,6 +1,7 @@
 import { join } from 'node:path'
-import { app, BrowserWindow, ipcMain, Menu, shell, type MenuItemConstructorOptions } from 'electron'
-import { apiFetch, ensureBackend, hasBackend, stopBackend, stopBackendGracefully } from './backend'
+import { app, BrowserWindow, ipcMain, Menu, session, shell, type MenuItemConstructorOptions } from 'electron'
+import { apiFetch, type ApiInit, ensureBackend, hasBackend, stopBackend, stopBackendGracefully } from './backend'
+import { registerDomainIpc } from './ipc'
 import { closeAllWs, registerWsProxy } from './wsproxy'
 
 // Topbar do renderer assumida com ~44px de altura: os traffic lights (12px)
@@ -62,8 +63,22 @@ function installMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
 
+/** Origem do próprio renderer (empacotado: file://; dev: servidor do electron-vite). */
+function isOwnOrigin(url: string): boolean {
+  if (url.startsWith('file://')) return true
+  const dev = process.env.ELECTRON_RENDERER_URL
+  return Boolean(dev && url.startsWith(new URL(dev).origin))
+}
+
 void app.whenReady().then(() => {
   installMenu()
+  // Microfone (ditado/transcriber) só para a página do próprio cockpit; iframes
+  // de preview (localhost:<porta>) e qualquer outra origem não ganham mídia.
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
+    const origin = details.requestingUrl || wc.getURL()
+    cb(permission === 'media' && isOwnOrigin(origin))
+  })
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => permission === 'media' && isOwnOrigin(origin))
   // O renderer recebe a info do backend MASCARADA: sem token, wsUrl sem
   // ?token=. WS e REST passam pelo main (wsproxy / hermes:api), que conhece o
   // token. O wsUrl continua servindo de marcador para HermesRpc.connect().
@@ -73,8 +88,9 @@ void app.whenReady().then(() => {
     ws.searchParams.delete('token')
     return { baseUrl: info.baseUrl, wsUrl: ws.toString(), token: '', pid: info.pid }
   })
-  ipcMain.handle('hermes:api', (_event, path: string) => apiFetch(path))
+  ipcMain.handle('hermes:api', (_event, path: string, init?: ApiInit) => apiFetch(path, init ?? {}))
   registerWsProxy()
+  registerDomainIpc()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
