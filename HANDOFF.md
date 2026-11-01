@@ -34,11 +34,22 @@ Funciona e está empacotado (`release/Hermes Cockpit-0.1.0-arm64.dmg`, Electron 
 - Smoke tests passaram: REST `/api/plugins/cockpit/bots` → 200 com dados reais;
   WS `/api/ws?token=` + `profiles.list` → 9 profiles reais.
 
-**Bug aberto nº 1 (rail vazia no app empacotado):** o `serve` valida Origin do
-WebSocket e só aceita `https?://(localhost|127.0.0.1)` — ver
-`hermes_cli/web_server.py` (~linha 386 e ~449). O renderer empacotado roda em
-`file://` → WS fechado (badge "fechado", rail mostra "nenhum profile
-retornado"). **Correção definida: proxy do WS pelo main process** (ver §5, P0-1).
+**Atualização 2026-11-01 (P0 + P1 entregues, commits `cf17dc7`..`c8240d1`):**
+- Bug nº 1 resolvido pelo proxy WS no main (`src/main/wsproxy.ts`). O diagnóstico
+  original (Origin `file://`) estava errado: `_ws_host_origin_reason` em
+  `hermes_cli/web_server_chat.py` aceita origins não-http. A causa real não foi
+  identificada; o proxy contorna. O token não vai mais ao renderer
+  (`backend()` devolve `token: ''`); outras rotas WS (ex.: `/api/pty`) usam
+  `window.hermes.ws.open(id, path)`.
+- Validado no app empacotado (via CDP `--remote-debugging-port`, já que
+  `screencapture` sai preto sem permissão de gravação): rail com os 8 bots,
+  `ws aberto`, histórico do Bot Chat do chief, resize persistido, quit mata o serve.
+- Pendente de validação manual: streaming ao vivo pela GUI, card de aprovação
+  ponta a ponta, overlays sobre a drag region, traffic lights com escala ≠ 100%.
+- Lacunas conhecidas: server requests `clarify/sudo/secret/...` sem UI (respondem
+  -32000); anexos e "Delegar" não implementados; pill Telegram e swarm sem fonte
+  no plugin; `dev:web` sem REST (preflight CORS do serve dá 401). Mapa de métodos
+  em `docs/GATEWAY.md`.
 
 ## 3. Gotchas críticos (todos morderam; não repita a investigação)
 
