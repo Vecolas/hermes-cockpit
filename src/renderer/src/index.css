@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+@theme {
+  /* Paleta "grafite" — continua a identidade do Hermes desktop */
+  --color-void: #0b0d10;
+  --color-panel: #101318;
+  --color-panel2: #141922;
+  --color-edge: #1e242e;
+  --color-edge2: #2a323f;
+  --color-ink: #d6dae2;
+  --color-dim: #8a919d;
+  --color-faint: #525a68;
+  --color-amber: #e8a33d;
+  --color-phos: #7ee787;
+  --color-cyanic: #6cb6ff;
+  --color-alert: #e5534b;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+  --font-display: "Iowan Old Style", "New York", ui-serif, Georgia, serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--color-void);
+  color: var(--color-ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* título serifado como na splash do Hermes */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+}
+
+/* micro-labels estilo cockpit */
+.label {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+
+/* glow sutil nos acentos */
+.glow-amber {
+  text-shadow: 0 0 12px color-mix(in srgb, var(--color-amber) 55%, transparent);
+}
+.glow-phos {
+  text-shadow: 0 0 12px color-mix(in srgb, var(--color-phos) 45%, transparent);
+}
+
+/* scanlines bem discretas — larp, mas sem cansar */
+.scanlines::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgb(255 255 255 / 0.012) 3px
+  );
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-edge2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-amber) 35%, transparent);
+}

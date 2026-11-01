@@ -1,0 +1,60 @@
+{
+  "name": "hermes-cockpit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cockpit local para o Hermes Agent — Electron + React + Tailwind",
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:web": "vite --config vite.web.config.ts",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "start": "electron-vite preview",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.alexandre.hermescockpit",
+    "productName": "Hermes Cockpit",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg"
+      ],
+      "identity": null,
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "title": "Hermes Cockpit",
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    }
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^40.10.2",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}
