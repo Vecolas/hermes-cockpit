@@ -664,8 +664,11 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   tabsRef.current = tabs
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!online) return
       const k = e.key.toLowerCase()
+      if (!online) {
+        if (e.metaKey && !e.altKey && !e.shiftKey && k === 't') toast({ title: 'Sem conexão com o Hermes', detail: 'nova conversa assim que o ws reconectar', tone: 'warn' })
+        return
+      }
       if (e.metaKey && !e.altKey && k === 't') {
         e.preventDefault()
         if (e.shiftKey) reopenTab()

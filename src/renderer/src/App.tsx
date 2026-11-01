@@ -277,6 +277,8 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
     else if (k === 'j' && !e.shiftKey) act(toggleDock)
     else if (k === ',') act(() => setSettings('aparencia'))
     else if (/^[1-9]$/.test(k) && !e.shiftKey && VIEWS[Number(k) - 1]) act(() => setView(VIEWS[Number(k) - 1].id))
+    // ⌘T de qualquer view: volta ao Chat; o ChatPane (sempre montado) cria a conversa nova.
+    else if (k === 't' && !e.shiftKey) setView('chat')
   }
   useEffect(() => {
     const h = (e: KeyboardEvent) => keyRef.current(e)

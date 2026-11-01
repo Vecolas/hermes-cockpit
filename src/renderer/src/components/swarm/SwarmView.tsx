@@ -12,6 +12,7 @@ import {
   useSwarm,
   type RunMeta,
 } from '../../lib/swarm'
+import { SwarmTree } from './SwarmTree'
 import { HermesSubagents } from './HermesSubagents'
 import { RunDetail } from './RunDetail'
 import { SpawnForm } from './SpawnForm'
@@ -22,7 +23,7 @@ import { Btn, RunBar, StatusDot, SwarmGate } from './ui'
 // CONTRATO: nome do export e props são fixos (App/registry já montam assim).
 
 type Filter = 'active' | 'done' | 'error' | 'all'
-type Tab = 'claude' | 'hermes'
+type Tab = 'tree' | 'claude' | 'hermes'
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'active', label: 'ativas' },
@@ -82,7 +83,10 @@ function groupRuns(runs: RunMeta[]): Group[] {
 
 export function SwarmView({ rpc }: { rpc: HermesRpc | null }) {
   const s = useSwarm()
-  const [tab, setTab] = useState<Tab>(() => (readLS(TAB_KEY) === 'hermes' ? 'hermes' : 'claude'))
+  const [tab, setTab] = useState<Tab>(() => {
+    const t = readLS(TAB_KEY)
+    return t === 'hermes' || t === 'claude' ? t : 'tree'
+  })
   const [filter, setFilter] = useState<Filter>('all')
   const [sel, setSel] = useState<string | null>(() => readLS(SEL_KEY))
   const [creating, setCreating] = useState(false)
@@ -132,7 +136,7 @@ export function SwarmView({ rpc }: { rpc: HermesRpc | null }) {
         aria-label="Swarm"
         onKeyDown={(e) => {
           // ←/→/Home/End movem a aba selecionada (padrão de ui/Tabs)
-          const ids = (['claude', 'hermes'] as Tab[])
+          const ids = (['tree', 'claude', 'hermes'] as Tab[])
           const i = ids.indexOf(tab)
           let n = -1
           if (e.key === 'ArrowRight') n = (i + 1) % ids.length
@@ -147,6 +151,7 @@ export function SwarmView({ rpc }: { rpc: HermesRpc | null }) {
       >
         {(
           [
+            ['tree', 'Árvore ao vivo'],
             ['claude', 'Claude Code'],
             ['hermes', 'Subagents Hermes'],
           ] as [Tab, string][]
@@ -164,7 +169,7 @@ export function SwarmView({ rpc }: { rpc: HermesRpc | null }) {
             }`}
           >
             {label}
-            {id === 'claude' && s.approvals.length > 0 && (
+            {(id === 'claude' || id === 'tree') && s.approvals.length > 0 && (
               <span className="ml-2 rounded-full bg-amber px-1.5 text-[9.5px] font-semibold text-void">{s.approvals.length}</span>
             )}
           </button>
@@ -179,6 +184,24 @@ export function SwarmView({ rpc }: { rpc: HermesRpc | null }) {
 
       {tab === 'hermes' ? (
         <HermesSubagents rpc={rpc} />
+      ) : tab === 'tree' ? (
+        <SwarmGate s={s}>
+          <div className="relative min-h-0 flex-1">
+            <SwarmTree
+              runs={s.runs}
+              approvals={s.approvals}
+              onOpen={(id) => {
+                setSel(id)
+                setTab('claude')
+              }}
+            />
+            <div className="absolute right-4 top-3">
+              <Btn tone="primary" onClick={() => { setTab('claude'); setCreating(true) }}>
+                + Nova tarefa
+              </Btn>
+            </div>
+          </div>
+        </SwarmGate>
       ) : (
         <SwarmGate s={s}>
           <div className="flex min-h-0 flex-1">

@@ -13,6 +13,7 @@ export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'done' | 'er
 
 export interface RunMeta {
   id: string
+  parentRunId?: string
   permissionMode?: 'manual' | 'auto' | 'acceptEdits' | 'bypass'
   groupId?: string
   title: string
@@ -81,6 +82,8 @@ export const swarmApi = {
   decide: (approvalId: string, decision: 'allow' | 'deny', reason?: string) =>
     invoke<void>('swarm:decide', approvalId, decision, reason),
   cancel: (runId: string) => invoke<void>('swarm:cancel', runId),
+  /** abre terminal real (Ghostty/Terminal): watch = seguir ao vivo; resume = claude --resume interativo */
+  openTerminal: (runId: string, mode: 'watch' | 'resume') => invoke<void>('swarm:openTerminal', runId, mode),
   spawn: (input: SpawnInput) => invoke<RunMeta>('swarm:spawn', input),
   send: (runId: string, message: string) => invoke<RunMeta>('swarm:send', runId, message),
   cleanup: (runId: string) => invoke<void>('swarm:cleanup', runId),

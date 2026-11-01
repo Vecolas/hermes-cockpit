@@ -203,6 +203,39 @@ function isRunnerPid(pid: number, runId: string): boolean {
   }
 }
 
+/** aspas simples seguras para /bin/zsh -lc */
+const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
+
+/**
+ * Abre uma janela de terminal de verdade (Ghostty se instalado, senão Terminal.app):
+ * - watch: segue a run ao vivo (swarm-bin/watch.mjs)
+ * - resume: claude --resume <sessão> interativo no worktree da run (só run terminada)
+ */
+async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<void> {
+  const file = metaPath(runId)
+  if (!existsSync(file)) throw new Error(`run não encontrada: ${runId}`)
+  const m = readJson<RunMeta & { claudeSessionId?: string; worktree?: string }>(file)
+  const cwd = m.cwd && existsSync(m.cwd) ? m.cwd : HOME
+  let cmd: string
+  if (mode === 'resume') {
+    if (!TERMINAL.has(m.status)) throw new Error('run ainda ativa — use "assistir"; retomar só depois que terminar')
+    if (!m.claudeSessionId || !/^[\w-]+$/.test(m.claudeSessionId)) throw new Error('run sem sessão do Claude Code para retomar')
+    cmd = `cd ${sq(cwd)} && claude --resume ${m.claudeSessionId}; exec /bin/zsh -l`
+  } else {
+    cmd = `${sq(nodeBin())} ${sq(join(BIN_DIR, 'watch.mjs'))} ${runId}; exec /bin/zsh -l`
+  }
+  const ghostty = ['/Applications/Ghostty.app', join(HOME, 'Applications', 'Ghostty.app')].find((p) => existsSync(p))
+  await new Promise<void>((resolve, reject) => {
+    const done = (err: Error | null) => (err ? reject(new Error(err.message.slice(0, 240))) : resolve())
+    if (ghostty) {
+      execFile('/usr/bin/open', ['-na', ghostty, '--args', `--working-directory=${cwd}`, '-e', '/bin/zsh', '-lc', cmd], (e) => done(e))
+    } else {
+      const esc = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+      execFile('/usr/bin/osascript', ['-e', `tell application "Terminal" to do script "${esc}"`, '-e', 'tell application "Terminal" to activate'], (e) => done(e))
+    }
+  })
+}
+
 function cancel(runId: string): void {
   const file = metaPath(runId)
   if (!existsSync(file)) throw new Error(`run não encontrada: ${runId}`)
@@ -359,6 +392,9 @@ export function register(): void {
     decide(approvalId, decision, reason, updatedInput),
   )
   handle('swarm:cancel', (runId: string) => cancel(runId))
+  handle('swarm:openTerminal', (runId: string, mode: 'watch' | 'resume') =>
+    openTerminal(assertId(runId, 'runId'), mode === 'resume' ? 'resume' : 'watch'),
+  )
   handle('swarm:config', () => runCli<{ defaultPermissionMode: string }>(['config-get']))
   handle('swarm:setConfig', (patch: { defaultPermissionMode?: string }) =>
     runCli<{ defaultPermissionMode: string }>(['config-set', JSON.stringify({ defaultPermissionMode: patch?.defaultPermissionMode })]),

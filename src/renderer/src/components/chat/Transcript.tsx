@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { STATUS_LABEL, fmtDuration, isActive, runElapsedMs, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
 import type { ChatItem } from '../../lib/chat-store'
 import { CodeBlock, Markdown } from './Markdown'
 
@@ -352,6 +353,7 @@ function ToolCard({ tool, verbose }: { tool: ToolItem; verbose: boolean }) {
           {hasDetail && <span className="text-faint">{open ? '▾' : '▸'}</span>}
         </span>
       </button>
+      {/claude_(spawn|spawn_many|send)/.test(tool.name) && <DelegationStrip tool={tool} />}
       {!open && verbose && tool.summary && <div className="truncate border-t border-edge/60 px-2.5 py-0.5 pl-8 text-faint">{tool.summary}</div>}
       {open && (
         <div className="hc-fade-in space-y-1.5 border-t border-edge/60 px-2.5 py-2">
@@ -392,4 +394,43 @@ function safeJson(v: unknown): string {
   } catch {
     return String(v)
   }
+}
+
+const RUN_ID_RE = /r-\d{8}-\d{6}-[0-9a-f]{4}/g
+
+/** Delegação ao Claude Code vista do chat: instâncias criadas pelo bot, ao vivo. */
+function DelegationStrip({ tool }: { tool: ToolItem }) {
+  const ids = useMemo(() => [...new Set(`${tool.result ?? ''} ${tool.summary ?? ''}`.match(RUN_ID_RE) ?? [])], [tool.result, tool.summary])
+  const s = useSwarm()
+  const runs = ids.map((id) => s.runs.find((r) => r.id === id)).filter((r): r is RunMeta => Boolean(r))
+  const anyActive = runs.some((r) => isActive(r.status))
+  const now = useNow(1000, anyActive)
+  if (!ids.length) return null
+  return (
+    <div className="hc-fade-in border-t border-edge/60 bg-void/40 px-2.5 py-1.5">
+      <div className="mb-1 flex items-center gap-2 text-[10px]">
+        <span className={`h-1.5 w-1.5 rotate-45 ${anyActive ? 'hc-pulse-dot bg-phos' : 'bg-faint'}`} />
+        <span className="label text-[9.5px]">delegado ao Claude Code · {ids.length} instância(s)</span>
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent('hc:view', { detail: 'swarm' }))}
+          className="ml-auto rounded border border-edge2 px-1.5 text-[10px] text-dim hover:border-phos/60 hover:text-phos"
+        >
+          ver árvore ↗
+        </button>
+      </div>
+      {ids.map((id) => {
+        const r = runs.find((x) => x.id === id)
+        return (
+          <div key={id} className="flex min-w-0 items-center gap-2 py-0.5 text-[10.5px]">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r ? (isActive(r.status) ? 'hc-pulse-dot bg-phos' : r.status === 'done' ? 'bg-phos/60' : 'bg-alert') : 'bg-faint'}`} />
+            <span className="min-w-0 flex-1 truncate text-ink/90">{r?.title ?? id}</span>
+            {r && <span className="shrink-0 text-faint">{STATUS_LABEL[r.status]}</span>}
+            {r && <span className="shrink-0 tabular-nums text-faint">{fmtDuration(runElapsedMs(r, now))}</span>}
+            {r && isActive(r.status) && <span className="h-1 w-10 shrink-0 overflow-hidden rounded bg-edge"><span className="hc-shimmer block h-full w-full" /></span>}
+          </div>
+        )
+      })}
+    </div>
+  )
 }

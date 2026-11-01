@@ -571,3 +571,20 @@ body::before {
     display: none;
   }
 }
+
+/* ── conectores animados da árvore do swarm (fluxo de dados) ─────────────── */
+@keyframes hc-flow-x { to { background-position: 24px 0; } }
+@keyframes hc-flow-y { to { background-position: 0 24px; } }
+.hc-flow-x {
+  background-image: repeating-linear-gradient(90deg, var(--color-phos) 0 8px, transparent 8px 12px, color-mix(in srgb, var(--color-phos) 35%, transparent) 12px 24px);
+  background-size: 24px 1px;
+  animation: hc-flow-x 0.9s linear infinite;
+}
+.hc-flow-y {
+  background-image: repeating-linear-gradient(180deg, var(--color-phos) 0 8px, transparent 8px 12px, color-mix(in srgb, var(--color-phos) 35%, transparent) 12px 24px);
+  background-size: 1px 24px;
+  animation: hc-flow-y 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-flow-x, .hc-flow-y { animation: none; }
+}
