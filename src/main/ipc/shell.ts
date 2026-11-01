@@ -18,6 +18,7 @@ import { app, ipcMain, type WebContents } from 'electron'
 const RELAY = String.raw`
 import os, pty, re, select, signal, struct, sys, fcntl, termios
 cols, rows, cwd = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+cmd = sys.argv[4] if len(sys.argv) > 4 else ''
 shell = os.environ.get('SHELL') or '/bin/zsh'
 pid, fd = pty.fork()
 if pid == 0:
@@ -26,6 +27,8 @@ if pid == 0:
     except Exception:
         pass
     os.environ['TERM'] = 'xterm-256color'
+    if cmd:
+        os.execvp(shell, [shell, '-lc', cmd])
     os.execvp(shell, [shell, '-l'])
 def setsize(c, r):
     try:
@@ -124,7 +127,7 @@ export function stopAllShells(): void {
 }
 
 export function register(): void {
-  ipcMain.handle('ops:shell.open', (e, id: unknown, opts: { cwd?: unknown; cols?: unknown; rows?: unknown } = {}) => {
+  ipcMain.handle('ops:shell.open', (e, id: unknown, opts: { cwd?: unknown; cols?: unknown; rows?: unknown; cmd?: unknown } = {}) => {
     if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('id de shell inválido')
     if (sessions.has(id)) kill(id)
     if (sessions.size >= MAX_SESSIONS) throw new Error(`limite de ${MAX_SESSIONS} shells abertos`)
@@ -132,7 +135,9 @@ export function register(): void {
     const rows = clampDim(opts.rows, 3, 300, 24)
     const env: NodeJS.ProcessEnv = { ...process.env, LANG: process.env.LANG || 'en_US.UTF-8' }
     delete env.ELECTRON_RUN_AS_NODE
-    const child = spawn(python(), [ensureRelay(), String(cols), String(rows), safeCwd(opts.cwd)], {
+    // cmd opcional: roda via `$SHELL -lc` (ex.: acompanhar/retomar uma instância do swarm)
+    const cmd = typeof opts.cmd === 'string' ? opts.cmd.slice(0, 4000) : ''
+    const child = spawn(python(), [ensureRelay(), String(cols), String(rows), safeCwd(opts.cwd), ...(cmd ? [cmd] : [])], {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
     })

@@ -18,6 +18,9 @@ import {
 import { toast } from '../../lib/toast'
 import { buildItems } from './RunStream'
 import { ConfirmButton, StatusDot } from './ui'
+import { SwarmApprovalCard } from './SwarmApproval'
+import { invoke } from '../../lib/ipc'
+import { requestTerminal } from '../devtools/TerminalTab'
 
 // Árvore ao vivo da delegação: Hermes → bot que pediu → grupo (multi-tarefa)
 // → instâncias do Claude Code (continuações aninhadas sob a run-mãe). Cada nó
@@ -67,8 +70,8 @@ export function SwarmTree({
   const lanes = useMemo(() => buildLanes(runs), [runs])
   const anyActive = lanes.some((l) => l.active)
   const pendingBy = useMemo(() => {
-    const m = new Map<string, number>()
-    for (const a of approvals) m.set(a.runId, (m.get(a.runId) ?? 0) + 1)
+    const m = new Map<string, Approval[]>()
+    for (const a of approvals) m.set(a.runId, [...(m.get(a.runId) ?? []), a])
     return m
   }, [approvals])
 
@@ -122,7 +125,7 @@ export function SwarmTree({
                     {g.runs.map((r) => (
                       <div key={r.id} className={`relative ${r.parentRunId ? 'ml-6' : ''}`}>
                         <span className={`absolute -left-4 top-5 h-px w-4 ${isActive(r.status) ? 'hc-flow-x' : 'bg-edge2'}`} />
-                        <RunNode run={r} pending={pendingBy.get(r.id) ?? 0} onOpen={() => onOpen(r.id)} />
+                        <RunNode run={r} pendingList={pendingBy.get(r.id) ?? []} onOpen={() => onOpen(r.id)} />
                       </div>
                     ))}
                   </div>
@@ -136,7 +139,9 @@ export function SwarmTree({
   )
 }
 
-const RunNode = memo(function RunNode({ run, pending, onOpen }: { run: RunMeta; pending: number; onOpen: () => void }) {
+const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMeta; pendingList: Approval[]; onOpen: () => void }) {
+  const pending = pendingList.length
+  const asks = pendingList.some((a) => a.toolName === 'AskUserQuestion')
   const active = isActive(run.status)
   const now = useNow(1000, active)
   const ev = useRunEvents(run.id, active)
@@ -172,7 +177,7 @@ const RunNode = memo(function RunNode({ run, pending, onOpen }: { run: RunMeta; 
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-[11.5px] text-ink hover:text-amber" title={run.task}>
           {run.title}
         </button>
-        <span className={`shrink-0 text-[10px] ${tone.text}`}>{pending ? `${pending} aprovação` : STATUS_LABEL[run.status]}</span>
+        <span className={`shrink-0 text-[10px] ${tone.text}`}>{pending ? (asks ? 'pergunta pra você' : `${pending} aprovação`) : STATUS_LABEL[run.status]}</span>
       </div>
 
       {/* terminal ao vivo */}
@@ -186,6 +191,15 @@ const RunNode = memo(function RunNode({ run, pending, onOpen }: { run: RunMeta; 
         {active && <span className="inline-block h-3 w-1.5 animate-pulse bg-phos align-middle" />}
       </div>
 
+      {/* perguntas / aprovações pendentes desta instância, respondidas aqui mesmo */}
+      {pendingList.length > 0 && (
+        <div className="space-y-2 border-t border-edge bg-panel2/40 p-2">
+          {pendingList.map((a) => (
+            <SwarmApprovalCard key={a.id} approval={a} run={run} compact />
+          ))}
+        </div>
+      )}
+
       {/* rodapé */}
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-edge px-2.5 py-1.5 text-[10px] text-faint">
         <span title={run.repo}>{repoName(run.repo)}</span>
@@ -197,6 +211,9 @@ const RunNode = memo(function RunNode({ run, pending, onOpen }: { run: RunMeta; 
         <span className="tabular-nums">{fmtDuration(runElapsedMs(run, now))}</span>
         <span>{fmtCost(run.costUsd)}</span>
         <span className="ml-auto flex gap-1 opacity-70 transition-opacity group-hover:opacity-100">
+          <MiniBtn onClick={() => openHere(run, active ? 'watch' : 'resume')} title={active ? 'seguir ao vivo no terminal do app (dock)' : 'claude --resume interativo no terminal do app (dock)'}>
+            ▣ abrir aqui
+          </MiniBtn>
           <MiniBtn onClick={() => void open('watch')} title="abrir num terminal real do Mac seguindo ao vivo">
             ⧉ assistir
           </MiniBtn>
@@ -266,4 +283,11 @@ function shortInput(input: unknown): string {
   const o = input as Record<string, unknown>
   const v = o.command ?? o.file_path ?? o.path ?? o.pattern ?? o.url ?? o.description
   return typeof v === 'string' ? v.replace(/\s+/g, ' ').slice(0, 120) : ''
+}
+
+/** Abre a instância dentro do app: aba Terminal do dock, num shell com o comando da run. */
+function openHere(run: RunMeta, mode: 'watch' | 'resume') {
+  invoke<{ cwd: string; cmd: string; title: string }>('swarm:terminalCommand', run.id, mode)
+    .then((t) => requestTerminal(t))
+    .catch((e: unknown) => toast({ title: 'Não abriu no app', detail: errMsg(e), tone: 'error' }))
 }

@@ -16,9 +16,26 @@ interface Session {
   /** 'zsh' (shell) ou nome do profile (hermes --tui) */
   profile: string
   cwd?: string | null
+  /** comando inicial (ex.: instância do swarm) e rótulo da aba */
+  cmd?: string
+  label?: string
   generation: number
   status: PtyStatus
   detail?: string
+}
+
+/** Pedidos de terminal com comando (ex.: árvore do swarm). Fila porque a aba
+ *  Terminal pode ainda não estar montada quando o pedido chega. */
+export interface TerminalRequest {
+  cwd?: string
+  cmd: string
+  title?: string
+}
+const queue: TerminalRequest[] = []
+export function requestTerminal(r: TerminalRequest): void {
+  queue.push(r)
+  window.dispatchEvent(new CustomEvent('hc:dock-tab', { detail: 'terminal' }))
+  window.dispatchEvent(new Event('hc:terminal-open'))
 }
 
 let seq = 0
@@ -76,6 +93,23 @@ export function TerminalTab({ rpc, active }: { rpc?: HermesRpc | null; active: b
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
 
+  // Instância do swarm aberta "aqui" (árvore → ▣ abrir aqui): nova aba de shell com o comando.
+  useEffect(() => {
+    const onOpen = () => {
+      const reqs = queue.splice(0)
+      if (!reqs.length) return
+      booted.current = true
+      const made = reqs.map(
+        (d): Session => ({ id: newId(), profile: SHELL, cwd: d.cwd ?? null, cmd: d.cmd, label: d.title, generation: 0, status: 'connecting' }),
+      )
+      setSessions((xs) => [...xs, ...made])
+      setCurrent(made[made.length - 1]!.id)
+    }
+    onOpen() // pedidos que chegaram antes de montar
+    window.addEventListener('hc:terminal-open', onOpen)
+    return () => window.removeEventListener('hc:terminal-open', onOpen)
+  }, [])
+
   const patch = (id: string, p: Partial<Session>) =>
     setSessions((xs) => xs.map((s) => (s.id === id ? { ...s, ...p } : s)))
 
@@ -102,7 +136,7 @@ export function TerminalTab({ rpc, active }: { rpc?: HermesRpc | null; active: b
             >
               <button type="button" onClick={() => setCurrent(s.id)} className="flex items-center gap-1.5">
                 <Dot status={s.status} />
-                <span className="uppercase tracking-wider">{s.profile === SHELL ? 'zsh' : `${s.profile} tui`}</span>
+                <span className="max-w-[160px] truncate uppercase tracking-wider">{s.label ?? (s.profile === SHELL ? 'zsh' : `${s.profile} tui`)}</span>
                 <span className="text-faint">#{i + 1}</span>
               </button>
               {s.status === 'open' || s.status === 'connecting' ? (
@@ -144,6 +178,7 @@ export function TerminalTab({ rpc, active }: { rpc?: HermesRpc | null; active: b
               id={s.id}
               kind={s.profile === SHELL ? 'shell' : 'hermes'}
               cwd={s.cwd}
+              cmd={s.cmd}
               profile={s.profile === SHELL ? undefined : s.profile}
               generation={s.generation}
               active={active && s.id === current}

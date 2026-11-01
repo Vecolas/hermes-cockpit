@@ -47,6 +47,8 @@ interface Props {
   kind?: 'shell' | 'hermes'
   /** cwd inicial do shell */
   cwd?: string | null
+  /** comando inicial do shell (roda via $SHELL -lc) */
+  cmd?: string
   profile?: string
   /** aba visível: refaz fit e foca */
   active: boolean
@@ -55,7 +57,7 @@ interface Props {
   onStatus: (s: PtyStatus, detail?: string) => void
 }
 
-export function XtermView({ id, kind = 'hermes', cwd, profile, active, generation, onStatus }: Props) {
+export function XtermView({ id, kind = 'hermes', cwd, cmd, profile, active, generation, onStatus }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
@@ -145,7 +147,7 @@ export function XtermView({ id, kind = 'hermes', cwd, profile, active, generatio
       termRef.current?.write('\r\n\x1b[90m── shell encerrado ──\x1b[0m\r\n')
     })
     let cancelled = false
-    invoke('ops:shell.open', myId, { cwd: cwd ?? undefined, cols: term?.cols ?? 80, rows: term?.rows ?? 24 })
+    invoke('ops:shell.open', myId, { cwd: cwd ?? undefined, cmd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 })
       .then(() => {
         if (cancelled) return
         openRef.current = true

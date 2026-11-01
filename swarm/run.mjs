@@ -231,11 +231,11 @@ function main() {
   const PM = { auto: 'auto', acceptEdits: 'acceptEdits', bypass: 'bypassPermissions' }
   if (PM[meta.permissionMode]) args.push('--permission-mode', PM[meta.permissionMode])
   if (meta.permissionMode === 'auto' || meta.permissionMode === 'bypass') {
-    // Headless de verdade: sem perguntas ao operador (perm.mjs também nega se escapar).
-    args.push('--disallowedTools', 'AskUserQuestion')
+    // Autônomo: decide sozinho; perguntas só quando indispensáveis (vão para o
+    // card do cockpit via perm.mjs; sem resposta em 10 min ele decide).
     args.push(
       '--append-system-prompt',
-      'Você roda em modo autônomo, sem humano disponível. Nunca pergunte nem peça confirmação: escolha a opção mais razoável, siga até concluir e liste as suposições feitas no resultado final.',
+      'Você roda em modo autônomo. Não peça confirmação para seguir. Use AskUserQuestion só para decisões que realmente dependem do usuário (ele responde pelo Hermes Cockpit); se a resposta não vier, escolha a opção mais razoável, siga até concluir e liste as suposições no resultado final.',
     )
   }
   if (meta.model) args.push('--model', meta.model)

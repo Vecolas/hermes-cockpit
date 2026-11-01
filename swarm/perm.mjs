@@ -28,7 +28,7 @@ const RUN_ID = process.env.RUN_ID || 'unknown'
 const TIMEOUT_MS = Number(process.env.SWARM_APPROVAL_TIMEOUT_MS) || 30 * 60 * 1000
 const POLL_MS = 300
 
-function waitDecision(id) {
+function waitDecision(id, timeoutMs = TIMEOUT_MS) {
   const file = approvalPath(id)
   return new Promise((resolveP) => {
     let done = false
@@ -59,13 +59,13 @@ function waitDecision(id) {
       try {
         const a = readJson(file)
         if (a.status === 'pending') {
-          writeJsonAtomic(file, { ...a, status: 'deny', decidedAt: nowIso(), reason: 'timeout de 30 min sem decisão' })
+          writeJsonAtomic(file, { ...a, status: 'deny', decidedAt: nowIso(), reason: `timeout de ${Math.round(timeoutMs / 60000)} min sem decisão` })
         }
       } catch {
         /* noop */
       }
-      finish({ status: 'deny', reason: 'timeout de 30 min sem decisão no cockpit' })
-    }, TIMEOUT_MS)
+      finish({ status: 'deny', reason: `timeout de ${Math.round(timeoutMs / 60000)} min sem decisão no cockpit` })
+    }, timeoutMs)
     try {
       watcher = watch(APPROVALS_DIR, (_e, name) => {
         if (!name || String(name).startsWith(id)) check()
@@ -108,28 +108,45 @@ serveMcp({
         } catch {
           /* meta ilegível: segue manual (mais seguro) */
         }
+        // Perguntas (AskUserQuestion) vão SEMPRE ao operador no cockpit, em
+        // qualquer modo: o card mostra as opções e a resposta volta como
+        // updatedInput.answers ({texto da pergunta: rótulo escolhido}). Em
+        // auto/bypass, sem resposta em 10 min o worker decide sozinho.
+        if (toolName === 'AskUserQuestion') {
+          const autonomous = mode === 'auto' || mode === 'bypass'
+          writeJsonAtomic(approvalPath(id), {
+            id,
+            runId: RUN_ID,
+            toolName,
+            kind: 'question',
+            input: args.input ?? {},
+            ...(args.tool_use_id ? { toolUseId: String(args.tool_use_id) } : {}),
+            status: 'pending',
+            createdAt: nowIso(),
+          })
+          const d = await waitDecision(id, autonomous ? 10 * 60 * 1000 : TIMEOUT_MS)
+          if (d.status === 'allow' && d.updatedInput && typeof d.updatedInput === 'object') {
+            return JSON.stringify({ behavior: 'allow', updatedInput: d.updatedInput })
+          }
+          return JSON.stringify({
+            behavior: 'deny',
+            message: d.reason
+              ? `O operador não respondeu (${d.reason}). Decida você mesmo com a opção mais razoável, siga e registre a suposição no resultado.`
+              : 'O operador preferiu não responder. Decida você mesmo com a opção mais razoável, siga e registre a suposição no resultado.',
+          })
+        }
         if (mode === 'auto' || mode === 'bypass') {
-          const ask = toolName === 'AskUserQuestion'
           writeJsonAtomic(approvalPath(id), {
             id,
             runId: RUN_ID,
             toolName,
             input: args.input ?? {},
-            status: ask ? 'deny' : 'allow',
+            status: 'allow',
             autoApproved: true,
-            reason: ask ? `modo ${mode}: sem perguntas ao operador` : `modo ${mode}`,
+            reason: `modo ${mode}`,
             createdAt: nowIso(),
             decidedAt: nowIso(),
           })
-          if (ask) {
-            return JSON.stringify({
-              behavior: 'deny',
-              message:
-                'Execução autônoma (modo ' +
-                mode +
-                '): não há operador para responder. Decida você mesmo com a opção mais razoável, siga em frente e registre as suposições no resultado final.',
-            })
-          }
           return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} })
         }
         const approval = {

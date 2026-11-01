@@ -40,6 +40,8 @@ export interface RunMeta {
 
 export interface Approval {
   id: string
+  /** 'question' = AskUserQuestion do Claude Code (responder, não aprovar) */
+  kind?: 'question'
   runId: string
   toolName: string
   input: unknown
@@ -79,8 +81,8 @@ export const swarmApi = {
   events: (runId: string, fromLine: number) =>
     invoke<{ lines: SwarmEventLine[]; next: number }>('swarm:events', runId, fromLine),
   approvals: () => invoke<Approval[]>('swarm:approvals'),
-  decide: (approvalId: string, decision: 'allow' | 'deny', reason?: string) =>
-    invoke<void>('swarm:decide', approvalId, decision, reason),
+  decide: (approvalId: string, decision: 'allow' | 'deny', reason?: string, updatedInput?: unknown) =>
+    invoke<void>('swarm:decide', approvalId, decision, reason, updatedInput),
   cancel: (runId: string) => invoke<void>('swarm:cancel', runId),
   /** abre terminal real (Ghostty/Terminal): watch = seguir ao vivo; resume = claude --resume interativo */
   openTerminal: (runId: string, mode: 'watch' | 'resume') => invoke<void>('swarm:openTerminal', runId, mode),

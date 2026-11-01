@@ -211,7 +211,7 @@ const sq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
  * - watch: segue a run ao vivo (swarm-bin/watch.mjs)
  * - resume: claude --resume <sessão> interativo no worktree da run (só run terminada)
  */
-async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<void> {
+function terminalCommand(runId: string, mode: 'watch' | 'resume'): { cwd: string; cmd: string; title: string } {
   const file = metaPath(runId)
   if (!existsSync(file)) throw new Error(`run não encontrada: ${runId}`)
   const m = readJson<RunMeta & { claudeSessionId?: string; worktree?: string }>(file)
@@ -224,6 +224,11 @@ async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<vo
   } else {
     cmd = `${sq(nodeBin())} ${sq(join(BIN_DIR, 'watch.mjs'))} ${runId}; exec /bin/zsh -l`
   }
+  return { cwd, cmd, title: `${mode === 'resume' ? 'claude' : 'watch'} · ${(m.title || runId).slice(0, 40)}` }
+}
+
+async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<void> {
+  const { cwd, cmd } = terminalCommand(runId, mode)
   const ghostty = ['/Applications/Ghostty.app', join(HOME, 'Applications', 'Ghostty.app')].find((p) => existsSync(p))
   await new Promise<void>((resolve, reject) => {
     const done = (err: Error | null) => (err ? reject(new Error(err.message.slice(0, 240))) : resolve())
@@ -392,6 +397,9 @@ export function register(): void {
     decide(approvalId, decision, reason, updatedInput),
   )
   handle('swarm:cancel', (runId: string) => cancel(runId))
+  handle('swarm:terminalCommand', (runId: string, mode: 'watch' | 'resume') =>
+    terminalCommand(assertId(runId, 'runId'), mode === 'resume' ? 'resume' : 'watch'),
+  )
   handle('swarm:openTerminal', (runId: string, mode: 'watch' | 'resume') =>
     openTerminal(assertId(runId, 'runId'), mode === 'resume' ? 'resume' : 'watch'),
   )
