@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Rea
 import { BOT_TITLES, type BotProfile } from '../lib/bots'
 import { chatReducer, initialChat, type PendingApproval } from '../lib/chat-store'
 import { api } from '../lib/ipc'
+import { HERMES_APPROVAL_LABEL, type HermesApproval } from '../lib/automode'
+import { openChatWindow } from '../lib/windows'
 import { toast } from '../lib/toast'
 import {
   closeSession,
@@ -18,6 +20,7 @@ import {
   resolveBotChat,
   respondApproval,
   resumeSession,
+  setApprovalMode,
   submitPrompt,
   type ApprovalChoice,
   type ApprovalRequest,
@@ -614,12 +617,19 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     }
   }, [profile, onNewSide, openSide])
 
+  const closedStack = useRef<Array<{ id: string; title: string }>>([])
+  const [closedCount, setClosedCount] = useState(0)
   const closeTab = useCallback(
     (key: string) => {
       if (key === CANONICAL_KEY) return
       setSideTabs((prev) => {
         const i = prev.findIndex((t) => t.key === key)
         if (i < 0) return prev
+        const gone = prev[i]
+        if (gone?.storedId) {
+          closedStack.current = [...closedStack.current.filter((c) => c.id !== gone.storedId), { id: gone.storedId, title: gone.title }].slice(-20)
+          setClosedCount(closedStack.current.length)
+        }
         const next = prev.filter((t) => t.key !== key)
         if (activeKeyRef.current === key) setActiveKey(next[Math.min(i, next.length - 1)]?.key ?? CANONICAL_KEY)
         return next
@@ -632,6 +642,48 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     },
     [rpc, profile, streaming],
   )
+
+  const closeMany = useCallback((keys: string[]) => keys.forEach((k) => closeTab(k)), [closeTab])
+  const reopenTab = useCallback(() => {
+    const last = closedStack.current.pop()
+    setClosedCount(closedStack.current.length)
+    if (last) openSide(last)
+  }, [openSide])
+  const popoutTab = useCallback(
+    (key: string) => {
+      if (!profile) return
+      const tab = sideTabs.find((t) => t.key === key)
+      openChatWindow(profile, tab?.storedId ? { id: tab.storedId, title: tab.title } : undefined)
+      if (tab) closeTab(key)
+    },
+    [profile, sideTabs, closeTab],
+  )
+
+  // atalhos de abas (janela focada): ⌘T novo, ⌘⇧T reabrir, ⌘⇧W fechar, ⌃Tab / ⌃⇧Tab ciclar
+  const tabsRef = useRef<ChatTab[]>([])
+  tabsRef.current = tabs
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!online) return
+      const k = e.key.toLowerCase()
+      if (e.metaKey && !e.altKey && k === 't') {
+        e.preventDefault()
+        if (e.shiftKey) reopenTab()
+        else void onNewSide()
+      } else if (e.metaKey && e.shiftKey && k === 'w') {
+        e.preventDefault()
+        closeTab(activeKeyRef.current)
+      } else if (e.ctrlKey && e.key === 'Tab') {
+        e.preventDefault()
+        const list = tabsRef.current
+        const i = list.findIndex((t) => t.key === activeKeyRef.current)
+        const next = list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length]
+        if (next) setActiveKey(next.key)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [online, reopenTab, onNewSide, closeTab])
 
   const renameTab = useCallback(
     async (key: string, title: string) => {
@@ -687,6 +739,28 @@ export function ChatPane({ rpc, bot, connState }: Props) {
   const totalTok = typeof usage?.total === 'number' ? usage.total : null
 
   const visibleApprovals = approvals
+
+  // Modo de aprovação do Hermes (manual → auto/smart → yolo/off). config.set
+  // grava approvals.mode do profile e o backend reemite session.info → chip atualiza.
+  const applyApproval = useCallback(
+    (mode: HermesApproval) => {
+      if (!rpc || !sid) return
+      setApprovalMode(rpc, sid, mode)
+        .then(() => toast({ title: `Aprovação: ${HERMES_APPROVAL_LABEL[mode]}`, tone: mode === 'off' ? 'warn' : 'ok' }))
+        .catch((e: unknown) => toast({ title: 'Falha ao trocar aprovação', detail: e instanceof Error ? e.message : String(e), tone: 'error' }))
+    },
+    [rpc, sid],
+  )
+  useEffect(() => {
+    const on = (e: Event) => applyApproval((e as CustomEvent<HermesApproval>).detail)
+    window.addEventListener('hc:approval-mode', on)
+    return () => window.removeEventListener('hc:approval-mode', on)
+  }, [applyApproval])
+  const cycleApproval = () => {
+    const order: HermesApproval[] = ['manual', 'smart', 'off']
+    const cur = (approvalMode ?? 'manual') as HermesApproval
+    applyApproval(order[(order.indexOf(cur) + 1) % order.length] ?? 'manual')
+  }
   const composerDisabled = !online || load.phase !== 'ready' || !sid
   const disabledReason = !rpc || connState !== 'open'
     ? 'backend desconectado'
@@ -783,6 +857,10 @@ export function ChatPane({ rpc, bot, connState }: Props) {
           onRename={renameTab}
           onReorder={reorderTabs}
           onNew={() => void onNewSide()}
+          onCloseMany={closeMany}
+          onReopen={reopenTab}
+          canReopen={closedCount > 0}
+          onPopout={popoutTab}
         />
       )}
 
@@ -895,7 +973,24 @@ export function ChatPane({ rpc, bot, connState }: Props) {
         prefill={prefill}
         onSend={onSend}
         onCancel={onCancel}
-        footerRight={[approvalMode ? `aprovação: ${approvalMode}` : null, modelName].filter(Boolean).join(' · ') || undefined}
+        footerExtra={
+          <button
+            type="button"
+            onClick={cycleApproval}
+            disabled={!sid}
+            title="modo de aprovação do Hermes — clique para alternar: manual → auto (smart) → yolo (off)"
+            className={`rounded border px-1.5 py-0.5 text-[10.5px] uppercase tracking-wider transition-colors disabled:opacity-40 ${
+              approvalMode === 'off'
+                ? 'border-alert/50 text-alert'
+                : approvalMode === 'smart'
+                  ? 'border-phos/50 text-phos'
+                  : 'border-edge2 text-faint hover:text-dim'
+            }`}
+          >
+            {approvalMode === 'off' ? '⚡ yolo' : approvalMode === 'smart' ? '◎ auto' : '◌ manual'}
+          </button>
+        }
+        footerRight={modelName ?? undefined}
         footerLeft={
           [
             target.kind === 'canonical' ? 'Bot Chat' : `side-chat · ${target.title}`,

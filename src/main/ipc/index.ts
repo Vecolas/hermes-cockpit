@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { register as registerOps } from './ops'
 import { register as registerShell } from './shell'
+import { register as registerWindows } from './windows'
 import { register as registerStorage } from './storage'
 import { register as registerSwarm } from './swarm'
 import { register as registerTranscriber } from './transcriber'
@@ -44,4 +45,5 @@ export function registerDomainIpc(): void {
   registerStorage()
   registerTranscriber()
   registerShell()
+  registerWindows()
 }

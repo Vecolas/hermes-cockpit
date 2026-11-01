@@ -25,11 +25,63 @@ interface Props {
   onRename: (key: string, title: string) => Promise<void>
   onReorder: (from: string, to: string) => void
   onNew: () => void
+  /** fecha várias abas de uma vez (side-chats) */
+  onCloseMany?: (keys: string[]) => void
+  /** reabre a última aba fechada */
+  onReopen?: () => void
+  canReopen?: boolean
+  /** abre a aba numa janela própria */
+  onPopout?: (key: string) => void
 }
 
 // Faixa de abas do chat: Bot Chat fixo + side-chats (fechar, renomear com duplo
 // clique, arrastar para reordenar, ponto pulsante quando há turno rodando).
-export function ChatTabs({ tabs, activeKey, streaming, disabled, onSelect, onClose, onRename, onReorder, onNew }: Props) {
+export function ChatTabs({
+  tabs,
+  activeKey,
+  streaming,
+  disabled,
+  onSelect,
+  onClose,
+  onRename,
+  onReorder,
+  onNew,
+  onCloseMany,
+  onReopen,
+  canReopen,
+  onPopout,
+}: Props) {
+  const [menu, setMenu] = useState<{ key: string | null; x: number; y: number } | null>(null)
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', close)
+    window.addEventListener('blur', close)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('keydown', close)
+      window.removeEventListener('blur', close)
+    }
+  }, [menu])
+  const sides = tabs.filter((t) => t.kind === 'side').map((t) => t.key)
+  const menuItems = (key: string | null): Array<{ label: string; run: () => void; off?: boolean }> => {
+    const idx = key ? tabs.findIndex((t) => t.key === key) : -1
+    const isSide = key ? key !== tabs[0]?.key && tabs[idx]?.kind === 'side' : false
+    return [
+      { label: 'Novo side-chat  ⌘T', run: onNew },
+      ...(key && onPopout ? [{ label: 'Abrir em nova janela', run: () => onPopout(key) }] : []),
+      ...(key && isSide ? [{ label: 'Fechar  ⌘⇧W', run: () => onClose(key) }] : []),
+      ...(onCloseMany
+        ? [
+            { label: 'Fechar outras', run: () => onCloseMany(sides.filter((k) => k !== key)), off: sides.filter((k) => k !== key).length === 0 },
+            ...(key ? [{ label: 'Fechar à direita', run: () => onCloseMany(tabs.slice(idx + 1).filter((t) => t.kind === 'side').map((t) => t.key)), off: !tabs.slice(idx + 1).some((t) => t.kind === 'side') }] : []),
+            { label: 'Fechar todas', run: () => onCloseMany(sides), off: sides.length === 0 },
+          ]
+        : []),
+      ...(onReopen ? [{ label: 'Reabrir fechada  ⌘⇧T', run: onReopen, off: !canReopen }] : []),
+    ]
+  }
   const [editing, setEditing] = useState<string | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [overKey, setOverKey] = useState<string | null>(null)
@@ -102,6 +154,10 @@ export function ChatTabs({ tabs, activeKey, streaming, disabled, onSelect, onClo
               }}
               onDragLeave={() => overKey === t.key && setOverKey(null)}
               onDrop={(e) => side && drop(e, t.key)}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                setMenu({ key: t.key, x: e.clientX, y: e.clientY })
+              }}
               onMouseDown={(e) => {
                 // botão do meio fecha side-chat (como em navegador)
                 if (e.button === 1 && side) {
@@ -169,6 +225,40 @@ export function ChatTabs({ tabs, activeKey, streaming, disabled, onSelect, onClo
       >
         +
       </button>
+      <button
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+          setMenu(menu ? null : { key: activeKey, x: r.right - 200, y: r.bottom + 2 })
+        }}
+        title="gerenciar abas"
+        className="shrink-0 border-l border-edge px-2 text-[13px] text-faint hover:bg-panel2 hover:text-ink"
+      >
+        ⋯
+      </button>
+      {menu && (
+        <div
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 210)), top: menu.y }}
+          className="hc-glass hc-rise fixed z-50 w-[200px] rounded-md border border-edge2 py-1 shadow-xl"
+        >
+          {menuItems(menu.key).map((it) => (
+            <button
+              key={it.label}
+              role="menuitem"
+              disabled={it.off}
+              onClick={() => {
+                setMenu(null)
+                it.run()
+              }}
+              className="block w-full px-3 py-1 text-left text-[11.5px] text-dim hover:bg-panel2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+            >
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

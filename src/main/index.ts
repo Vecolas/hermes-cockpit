@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain, Menu, session, shell, type MenuItemConstru
 import { apiFetch, type ApiInit, ensureBackend, hasBackend, stopBackend, stopBackendGracefully } from './backend'
 import { registerDomainIpc } from './ipc'
 import { stopAllShells } from './ipc/shell'
+import { setWindowFactory } from './ipc/windows'
 import { stopSwarmWatch } from './ipc/swarm'
 import { stopTranscriber } from './ipc/transcriber'
 import { closeAllWs, registerWsProxy } from './wsproxy'
@@ -12,14 +13,15 @@ import { closeAllWs, registerWsProxy } from './wsproxy'
 // renderer deve reservar ~80px à esquerda da topbar para não colidir.
 const TRAFFIC_LIGHTS = { x: 14, y: 15 }
 
-function createWindow(): void {
+function createWindow(query: Record<string, string> = {}): void {
+  const chat = query.window === 'chat'
   const win = new BrowserWindow({
-    width: 1480,
-    height: 920,
+    width: chat ? 760 : 1480,
+    height: chat ? 860 : 920,
     // Abaixo de 1100px lógicos o renderer entra no modo estreito (rail/dock em
     // gavetas, strip com scroll) — a janela precisa poder chegar lá.
-    minWidth: 720,
-    minHeight: 700,
+    minWidth: chat ? 420 : 720,
+    minHeight: chat ? 480 : 700,
     backgroundColor: '#0b0d10',
     title: 'Hermes Cockpit',
     titleBarStyle: 'hiddenInset',
@@ -38,9 +40,11 @@ function createWindow(): void {
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    const u = new URL(process.env.ELECTRON_RENDERER_URL)
+    for (const [k, v] of Object.entries(query)) u.searchParams.set(k, v)
+    void win.loadURL(u.toString())
   } else {
-    void win.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    void win.loadFile(join(import.meta.dirname, '../renderer/index.html'), { query })
   }
 }
 
@@ -50,6 +54,15 @@ function createWindow(): void {
 function installMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Nova janela de chat', accelerator: 'CmdOrCtrl+Shift+N', click: () => createWindow({ window: 'chat' }) },
+        { label: 'Nova janela do cockpit', accelerator: 'CmdOrCtrl+Alt+N', click: () => createWindow() },
+        { type: 'separator' },
+        { role: 'close' },
+      ],
+    },
     { role: 'editMenu' },
     {
       label: 'View',
@@ -93,6 +106,7 @@ void app.whenReady().then(() => {
   })
   ipcMain.handle('hermes:api', (_event, path: string, init?: ApiInit) => apiFetch(path, init ?? {}))
   registerWsProxy()
+  setWindowFactory(createWindow)
   registerDomainIpc()
   createWindow()
   app.on('activate', () => {
