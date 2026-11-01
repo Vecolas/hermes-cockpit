@@ -230,6 +230,14 @@ function main() {
   // Modo de permissão (meta.permissionMode, ver state.mjs). 'manual' = padrão do CLI.
   const PM = { auto: 'auto', acceptEdits: 'acceptEdits', bypass: 'bypassPermissions' }
   if (PM[meta.permissionMode]) args.push('--permission-mode', PM[meta.permissionMode])
+  if (meta.permissionMode === 'auto' || meta.permissionMode === 'bypass') {
+    // Headless de verdade: sem perguntas ao operador (perm.mjs também nega se escapar).
+    args.push('--disallowedTools', 'AskUserQuestion')
+    args.push(
+      '--append-system-prompt',
+      'Você roda em modo autônomo, sem humano disponível. Nunca pergunte nem peça confirmação: escolha a opção mais razoável, siga até concluir e liste as suposições feitas no resultado final.',
+    )
+  }
   if (meta.model) args.push('--model', meta.model)
   if (meta.resumeSessionId) args.push('--resume', meta.resumeSessionId)
   args.push('--', meta.task)

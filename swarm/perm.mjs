@@ -20,6 +20,7 @@ import {
   newApprovalId,
   nowIso,
   readJson,
+  readMeta,
   writeJsonAtomic,
 } from './lib/state.mjs'
 
@@ -95,6 +96,42 @@ serveMcp({
       async handler(args) {
         ensureDirs()
         const id = newApprovalId()
+        const toolName = String(args.tool_name ?? 'desconhecida')
+        // auto/bypass: sem card. O classificador do Claude Code (auto) ou a
+        // escolha explícita do operador (bypass) já decidiram; o que ainda
+        // chega aqui é aprovado e fica registrado (autoApproved) para auditoria.
+        // Perguntas ao usuário (AskUserQuestion) não têm humano em headless:
+        // nega com instrução de decidir sozinho.
+        let mode = 'manual'
+        try {
+          mode = readMeta(RUN_ID)?.permissionMode || 'manual'
+        } catch {
+          /* meta ilegível: segue manual (mais seguro) */
+        }
+        if (mode === 'auto' || mode === 'bypass') {
+          const ask = toolName === 'AskUserQuestion'
+          writeJsonAtomic(approvalPath(id), {
+            id,
+            runId: RUN_ID,
+            toolName,
+            input: args.input ?? {},
+            status: ask ? 'deny' : 'allow',
+            autoApproved: true,
+            reason: ask ? `modo ${mode}: sem perguntas ao operador` : `modo ${mode}`,
+            createdAt: nowIso(),
+            decidedAt: nowIso(),
+          })
+          if (ask) {
+            return JSON.stringify({
+              behavior: 'deny',
+              message:
+                'Execução autônoma (modo ' +
+                mode +
+                '): não há operador para responder. Decida você mesmo com a opção mais razoável, siga em frente e registre as suposições no resultado final.',
+            })
+          }
+          return JSON.stringify({ behavior: 'allow', updatedInput: args.input ?? {} })
+        }
         const approval = {
           id,
           runId: RUN_ID,
