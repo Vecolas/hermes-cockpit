@@ -8,7 +8,7 @@ import { CountUp, Gauge, Sparkline } from '../ui/Viz'
 import { PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import { agendaFonte, agendaPartialError, type WidgetProps } from './widgets'
-import { API, CALENDAR_COLORS, calendarColor, fmtReset, quotaWindows, type Agenda, type AgendaEvent, type CronJob, type Quota } from './types'
+import { API, CALENDAR_COLORS, calendarColor, fmtReset, fmtTokens, providerUsage, quotaWindows, totalTokens, type Agenda, type AgendaEvent, type CronJob, type Quota } from './types'
 
 // Widgets v3 do registry: agenda da semana multi-conta, próximos crons,
 // atividade do swarm e gauges de cota. Todos filtram pelo espaço ativo e
@@ -357,8 +357,7 @@ export function QuotaGaugesWidget({ refreshMs }: WidgetProps) {
   const quota = usePluginSource<Quota>(API.quota, refreshMs)
   const q = quota.data
   const provs = q?.provedores ?? []
-  const budgetPct =
-    typeof q?.gasto_brl === 'number' && typeof q.budget_brl === 'number' && q.budget_brl > 0 ? (q.gasto_brl / q.budget_brl) * 100 : null
+  const total = totalTokens(provs)
   return (
     <PanelFrame
       titulo="Cota"
@@ -372,17 +371,10 @@ export function QuotaGaugesWidget({ refreshMs }: WidgetProps) {
     >
       {q && (
         <div className="hc-stagger flex flex-wrap items-start gap-x-3 gap-y-2">
-          {(budgetPct != null || q.gasto_brl != null) && (
-            <Gauge
-              pct={budgetPct}
-              size={60}
-              label="orçamento"
-              sub={q.gasto_brl != null ? `R$ ${q.gasto_brl.toFixed(0)}${q.budget_brl != null ? ` / ${q.budget_brl.toFixed(0)}` : ''}` : undefined}
-            />
-          )}
+          {total != null && <Gauge pct={null} size={60} label="tokens" sub={fmtTokens(total)} />}
           {provs.map((p, i) => {
             const ws = quotaWindows(p)
-            const usd = p.usd != null ? `US$ ${p.usd.toFixed(2)}` : undefined
+            const usd = providerUsage(p).text ?? undefined
             if (ws.length === 0)
               return (
                 <ProviderGauges key={`${p.nome}-${i}`} nome={p.nome}>

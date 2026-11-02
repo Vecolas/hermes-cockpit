@@ -86,7 +86,10 @@ export interface QuotaProvedor {
   plano?: string
   janelas?: QuotaJanela[]
   aviso?: string
+  /** Custo estimado a partir de logs de tokens — NÃO é cota em créditos, salvo `unidade: 'creditos'`. */
   usd?: number
+  /** Unidade da cota/consumo. Ausente = 'tokens'. Só 'creditos' autoriza exibir US$. */
+  unidade?: 'tokens' | 'creditos'
   tokens_in?: number
   tokens_out?: number
 }
@@ -185,4 +188,39 @@ export function fmtReset(reset: string | number | null | undefined, now = Date.n
   const m = mins % 60
   const short = days > 0 ? `em ${days}d ${hours}h` : hours > 0 ? `em ${hours}h${String(m).padStart(2, '0')}` : `em ${m}min`
   return { short, full }
+}
+
+/** Tokens compactos: 999, 12k, 2.5M. */
+export function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`
+  return String(n)
+}
+
+const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n)
+
+export interface ProviderUsage {
+  kind: 'tokens' | 'creditos' | 'none'
+  /** texto pronto ("12k tokens" / "US$ 4.50"); null quando não há consumo informado */
+  text: string | null
+}
+
+/** Consumo mensal do provedor: tokens por padrão; US$ somente com unidade 'creditos' e usd numérico. */
+export function providerUsage(p: Pick<QuotaProvedor, 'unidade' | 'usd' | 'tokens_in' | 'tokens_out'>): ProviderUsage {
+  if (p.unidade === 'creditos' && isNum(p.usd)) return { kind: 'creditos', text: `US$ ${p.usd.toFixed(2)}` }
+  if (isNum(p.tokens_in) || isNum(p.tokens_out)) {
+    return { kind: 'tokens', text: `${fmtTokens((isNum(p.tokens_in) ? p.tokens_in : 0) + (isNum(p.tokens_out) ? p.tokens_out : 0))} tokens` }
+  }
+  return { kind: 'none', text: null }
+}
+
+/** Total de tokens (in+out) entre provedores; null se nenhum informou tokens. */
+export function totalTokens(provs: QuotaProvedor[] | undefined): number | null {
+  let total = 0
+  let any = false
+  for (const p of provs ?? []) {
+    if (isNum(p.tokens_in)) (total += p.tokens_in), (any = true)
+    if (isNum(p.tokens_out)) (total += p.tokens_out), (any = true)
+  }
+  return any ? total : null
 }

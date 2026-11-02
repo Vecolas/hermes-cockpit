@@ -6,6 +6,9 @@ import {
   API,
   calendarColor,
   fmtReset,
+  fmtTokens,
+  providerUsage,
+  totalTokens,
   quotaWindows,
   worstWindow,
   type Agenda,
@@ -330,6 +333,7 @@ export function QuotaWidget({ refreshMs }: WidgetProps) {
   const quota = usePluginSource<Quota>(API.quota, refreshMs)
   const q = quota.data
   const provs = q?.provedores ?? []
+  const total = totalTokens(provs)
   return (
     <PanelFrame
       titulo="Provedores · cota"
@@ -341,11 +345,9 @@ export function QuotaWidget({ refreshMs }: WidgetProps) {
     >
       {q && (
         <div className="space-y-1.5">
-          {q.gasto_brl != null && (
+          {total != null && (
             <div className="text-[11px] text-dim">
-              gasto <span className="text-amber">R$ {q.gasto_brl.toFixed(0)}</span>
-              {q.budget_brl != null && <> / R$ {q.budget_brl.toFixed(0)}</>}
-              {q.gasto_usd != null && <span className="text-faint"> · US$ {q.gasto_usd.toFixed(2)}</span>}
+              consumo <span className="text-amber">{fmtTokens(total)} tokens</span>
             </div>
           )}
           {provs.map((p, i) => (
@@ -360,15 +362,9 @@ export function QuotaWidget({ refreshMs }: WidgetProps) {
 export function ProviderRow({ p }: { p: NonNullable<Quota['provedores']>[number] }) {
   const ws = quotaWindows(p)
   const worst = worstWindow(p)
-  const tokens = (p.tokens_in ?? 0) + (p.tokens_out ?? 0)
-  // Uso do mês em USD/tokens (sempre visível quando existe, é separado das janelas de limite).
-  const monthly = [
-    p.usd != null ? `US$ ${p.usd.toFixed(2)}` : null,
-    p.tokens_in != null || p.tokens_out != null ? `${fmtTokens(tokens)} tokens` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
-  const right = worst ? `${Math.round(worst.pct)}%` : p.usd != null ? `US$ ${p.usd.toFixed(2)}` : '—'
+  // Uso do mês: tokens por padrão; US$ só para cota explicitamente em créditos.
+  const monthly = providerUsage(p).text ?? ''
+  const right = worst ? `${Math.round(worst.pct)}%` : monthly || '—'
   const tone = i2tone(p.nome)
   return (
     <div role="group" aria-label={`Cota ${p.nome ?? 'provedor'}`}>
@@ -424,12 +420,6 @@ function i2tone(nome?: string): 'amber' | 'phos' | 'cyanic' {
   let h = 0
   for (const ch of nome ?? '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
   return TONES[h % TONES.length]
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
-  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`
-  return String(n)
 }
 
 // ─── Sistema (Mac) ───────────────────────────────────────────────────────────
