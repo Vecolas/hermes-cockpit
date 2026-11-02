@@ -144,3 +144,45 @@ export function maxPct(p: QuotaProvedor): number | null {
   const pcts = (p.janelas ?? []).map((j) => j.pct).filter((n): n is number => typeof n === 'number')
   return pcts.length ? Math.max(...pcts) : null
 }
+
+/** Janela de uso com pct válido; as sem pct ficam de fora (nada é inventado). */
+export function quotaWindows(p: QuotaProvedor): Array<QuotaJanela & { pct: number; label: string }> {
+  return (p.janelas ?? [])
+    .filter((j): j is QuotaJanela & { pct: number } => typeof j.pct === 'number' && Number.isFinite(j.pct))
+    .map((j) => ({ ...j, label: (j.nome ?? '').trim() || 'janela' }))
+}
+
+/** Janela mais cheia de um provedor (para tom/alerta), ou null. */
+export function worstWindow(p: QuotaProvedor) {
+  const ws = quotaWindows(p)
+  return ws.length ? ws.reduce((a, b) => (b.pct > a.pct ? b : a)) : null
+}
+
+function parseReset(reset: string | number | null | undefined): Date | null {
+  if (reset == null || reset === '') return null
+  let d: Date
+  if (typeof reset === 'number') d = new Date(reset < 1e12 ? reset * 1000 : reset)
+  else if (/^\d{9,13}$/.test(reset.trim())) {
+    const n = Number(reset)
+    d = new Date(n < 1e12 ? n * 1000 : n)
+  } else d = new Date(reset)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/**
+ * Reset legível: `short` ("em 2h13", "em 3d 4h", "agora") e `full` (data local
+ * completa para tooltip). Valor não interpretável vira o texto original; ausente = null.
+ */
+export function fmtReset(reset: string | number | null | undefined, now = Date.now()): { short: string; full: string } | null {
+  if (reset == null || reset === '') return null
+  const d = parseReset(reset)
+  if (!d) return { short: String(reset), full: String(reset) }
+  const full = d.toLocaleString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+  const mins = Math.round((d.getTime() - now) / 60_000)
+  if (mins <= 0) return { short: 'reset já passou', full }
+  const days = Math.floor(mins / 1440)
+  const hours = Math.floor((mins % 1440) / 60)
+  const m = mins % 60
+  const short = days > 0 ? `em ${days}d ${hours}h` : hours > 0 ? `em ${hours}h${String(m).padStart(2, '0')}` : `em ${m}min`
+  return { short, full }
+}

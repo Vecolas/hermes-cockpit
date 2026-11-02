@@ -5,7 +5,9 @@ import { usePluginSource } from './source'
 import {
   API,
   calendarColor,
-  maxPct,
+  fmtReset,
+  quotaWindows,
+  worstWindow,
   type Agenda,
   type AgendaEvent,
   type Foco,
@@ -356,24 +358,61 @@ export function QuotaWidget({ refreshMs }: WidgetProps) {
 }
 
 export function ProviderRow({ p }: { p: NonNullable<Quota['provedores']>[number] }) {
-  const pct = maxPct(p)
-  const right =
-    pct != null ? `${Math.round(pct)}%` : p.usd != null ? `US$ ${p.usd.toFixed(2)}` : p.aviso ? '—' : '—'
-  const sub =
-    (p.janelas ?? [])
-      .map((j) => `${j.nome ?? ''} ${typeof j.pct === 'number' ? Math.round(j.pct) + '%' : ''}`.trim())
-      .join(' · ') || p.aviso || (p.tokens_in != null ? `${fmtTokens((p.tokens_in ?? 0) + (p.tokens_out ?? 0))} tokens` : '')
+  const ws = quotaWindows(p)
+  const worst = worstWindow(p)
+  const tokens = (p.tokens_in ?? 0) + (p.tokens_out ?? 0)
+  // Uso do mês em USD/tokens (sempre visível quando existe, é separado das janelas de limite).
+  const monthly = [
+    p.usd != null ? `US$ ${p.usd.toFixed(2)}` : null,
+    p.tokens_in != null || p.tokens_out != null ? `${fmtTokens(tokens)} tokens` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const right = worst ? `${Math.round(worst.pct)}%` : p.usd != null ? `US$ ${p.usd.toFixed(2)}` : '—'
+  const tone = i2tone(p.nome)
   return (
-    <div title={[p.plano, sub, p.aviso].filter(Boolean).join(' — ')}>
+    <div role="group" aria-label={`Cota ${p.nome ?? 'provedor'}`}>
       <div className="flex items-baseline justify-between gap-2 text-[11px]">
-        <span className="truncate text-ink">
+        <span className="truncate text-ink" title={[p.nome, p.plano].filter(Boolean).join(' · ')}>
           {p.nome}
           {p.plano ? <span className="text-faint"> · {p.plano}</span> : null}
         </span>
-        <span className="shrink-0 text-[10px] text-dim">{right}</span>
+        <span className="shrink-0 text-[10px] text-dim" title={worst ? `maior uso: ${worst.label}` : undefined}>
+          {right}
+        </span>
       </div>
-      <Bar pct={pct} tone={i2tone(p.nome)} />
-      {sub && <div className="mt-0.5 truncate text-[9px] text-faint">{sub}</div>}
+      {ws.length === 0 && <Bar pct={null} tone={tone} />}
+      {ws.length > 0 && (
+        <ul className="mt-0.5 space-y-1">
+          {ws.map((w, i) => {
+            const r = fmtReset(w.reset)
+            return (
+              <li key={`${w.label}-${i}`} aria-label={`${w.label} ${Math.round(w.pct)}%${r ? `, reset ${r.short}` : ''}`}>
+                <div className="flex items-baseline justify-between gap-2 text-[9px]">
+                  <span className="truncate text-dim">{w.label}</span>
+                  <span className="shrink-0 tabular-nums text-faint">
+                    {r && (
+                      <span title={r.full} className="mr-1.5">
+                        reset {r.short}
+                      </span>
+                    )}
+                    <span className="text-dim">{Math.round(w.pct)}%</span>
+                  </span>
+                </div>
+                <Bar pct={w.pct} tone={tone} />
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {(monthly || p.aviso) && (
+        <div className="mt-0.5 truncate text-[9px] text-faint" title={[monthly && `mês: ${monthly}`, p.aviso].filter(Boolean).join(' — ')}>
+          {monthly && <>mês {monthly}</>}
+          {monthly && p.aviso && ' · '}
+          {p.aviso && <span className="text-amber/80">{p.aviso}</span>}
+        </div>
+      )}
+      {ws.length === 0 && !monthly && !p.aviso && <div className="mt-0.5 text-[9px] text-faint">sem janela de limite</div>}
     </div>
   )
 }

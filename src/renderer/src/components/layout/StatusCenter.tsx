@@ -3,7 +3,7 @@ import { setAutoMode, useAutoMode } from '../../lib/automode'
 import type { ConnState } from '../../lib/rpc'
 import { Bar } from '../panels/PanelFrame'
 import { usePluginSource } from '../panels/source'
-import { API, maxPct, type Quota, type Sistema } from '../panels/types'
+import { API, fmtReset, quotaWindows, worstWindow, type Quota, type Sistema } from '../panels/types'
 import { Icon, type IconName } from '../ui/Icon'
 import { cx } from '../ui/cx'
 
@@ -24,6 +24,7 @@ interface Row {
   tone: Tone
   value: ReactNode
   detail: string
+  windows?: Array<{ key: string; prov: string; label: string; pct: number; reset?: string | null }>
 }
 
 /**
@@ -88,7 +89,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
   const q = quota.data
   const spend =
     typeof q?.gasto_brl === 'number' && typeof q.budget_brl === 'number' && q.budget_brl > 0 ? (q.gasto_brl / q.budget_brl) * 100 : null
-  const worstProv = Math.max(-1, ...(q?.provedores ?? []).map((p) => maxPct(p) ?? -1))
+  const worstProv = Math.max(-1, ...(q?.provedores ?? []).map((p) => worstWindow(p)?.pct ?? -1))
   const cota: Row = {
     id: 'quota',
     icon: 'money',
@@ -101,6 +102,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
             tone: ((spend ?? 0) >= 90 || worstProv >= 90 ? 'bad' : (spend ?? 0) >= 75 || worstProv >= 75 ? 'warn' : 'ok') as Tone,
             value: q.gasto_brl != null ? `R$ ${q.gasto_brl.toFixed(0)} / ${q.budget_brl?.toFixed(0) ?? '?'}` : '—',
             detail: `US$ ${q.gasto_usd?.toFixed(2) ?? '?'} × câmbio ${q.fx ?? '?'} · mês ${q.mes ?? '?'}`,
+            windows: (q.provedores ?? []).flatMap((p) => quotaWindows(p).map((w) => ({ key: `${p.nome}-${w.label}`, prov: p.nome ?? '?', label: w.label, pct: w.pct, reset: w.reset }))),
           }),
   }
   const rows = [ws, mac, tg, cota]
@@ -148,6 +150,22 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
                     <span className={cx('shrink-0 tabular-nums', r.tone === 'bad' ? 'text-alert' : 'text-dim')}>{r.value}</span>
                   </div>
                   <div className="truncate text-[10px] text-faint">{r.detail}</div>
+                  {r.windows && r.windows.length > 0 && (
+                    <ul className="mt-1 space-y-0.5" aria-label="janelas de uso por provedor">
+                      {r.windows.map((w) => {
+                        const rs = fmtReset(w.reset)
+                        return (
+                          <li key={w.key} className="flex items-baseline gap-1.5 text-[10px]" title={rs?.full}>
+                            <span className="min-w-0 flex-1 truncate text-dim">
+                              {w.prov} · {w.label}
+                            </span>
+                            {rs && <span className="shrink-0 text-[9px] text-faint">reset {rs.short}</span>}
+                            <span className={cx('w-8 shrink-0 text-right tabular-nums', w.pct >= 90 ? 'text-alert' : 'text-dim')}>{Math.round(w.pct)}%</span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
                   {r.id === 'quota' && spend != null && (
                     <div className="mt-1">
                       <Bar pct={spend} tone="amber" />

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/ipc'
 import { agendaPath, inSpace, spaceOfAccount, spaceOfBot, spaceOfPath, useSpace, type ItemSpace } from '../../lib/space'
@@ -7,7 +8,7 @@ import { CountUp, Gauge, Sparkline } from '../ui/Viz'
 import { PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import { agendaFonte, agendaPartialError, type WidgetProps } from './widgets'
-import { API, CALENDAR_COLORS, calendarColor, maxPct, type Agenda, type AgendaEvent, type CronJob, type Quota } from './types'
+import { API, CALENDAR_COLORS, calendarColor, fmtReset, quotaWindows, type Agenda, type AgendaEvent, type CronJob, type Quota } from './types'
 
 // Widgets v3 do registry: agenda da semana multi-conta, próximos crons,
 // atividade do swarm e gauges de cota. Todos filtram pelo espaço ativo e
@@ -339,6 +340,19 @@ export function SwarmActivityWidget(props: WidgetProps) {
 
 // ─── Cota (gauges radiais) ───────────────────────────────────────────────────
 
+/** Agrupa os gauges das janelas de um provedor sob o nome dele. */
+function ProviderGauges({ nome, sub, children }: { nome?: string; sub?: string; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={`Cota ${nome ?? 'provedor'}`} className="min-w-0 rounded-md border border-edge/70 px-2 py-1.5">
+      <div className="mb-1 flex items-baseline gap-2 text-[10px]">
+        <span className="truncate text-ink">{nome ?? '?'}</span>
+        {sub && <span className="truncate text-[9px] text-faint">{sub}</span>}
+      </div>
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">{children}</div>
+    </div>
+  )
+}
+
 export function QuotaGaugesWidget({ refreshMs }: WidgetProps) {
   const quota = usePluginSource<Quota>(API.quota, refreshMs)
   const q = quota.data
@@ -367,15 +381,21 @@ export function QuotaGaugesWidget({ refreshMs }: WidgetProps) {
             />
           )}
           {provs.map((p, i) => {
-            const pct = maxPct(p)
+            const ws = quotaWindows(p)
+            const usd = p.usd != null ? `US$ ${p.usd.toFixed(2)}` : undefined
+            if (ws.length === 0)
+              return (
+                <ProviderGauges key={`${p.nome}-${i}`} nome={p.nome}>
+                  <Gauge pct={null} size={60} label="mês" sub={usd ?? p.aviso ?? 'sem janela'} />
+                </ProviderGauges>
+              )
             return (
-              <Gauge
-                key={`${p.nome}-${i}`}
-                pct={pct}
-                size={60}
-                label={p.nome ?? '?'}
-                sub={pct == null ? (p.usd != null ? `US$ ${p.usd.toFixed(2)}` : (p.aviso ?? 'sem janela')) : p.plano}
-              />
+              <ProviderGauges key={`${p.nome}-${i}`} nome={p.nome} sub={usd ? `mês ${usd}` : p.aviso}>
+                {ws.map((w, k) => {
+                  const r = fmtReset(w.reset)
+                  return <Gauge key={`${w.label}-${k}`} pct={w.pct} size={60} label={w.label} sub={r ? `reset ${r.short}` : undefined} />
+                })}
+              </ProviderGauges>
             )
           })}
         </div>
