@@ -6,7 +6,7 @@ import type { LayoutStorage } from 'react-resizable-panels'
 // (useDefaultLayout) através de `safeStorage`.
 
 /** Views da área central (abas da topbar, ⌘1..⌘4). */
-export const VIEW_IDS = ['chat', 'swarm', 'ops', 'transcrever'] as const
+export const VIEW_IDS = ['chat', 'swarm', 'automacoes', 'notion', 'ops', 'transcrever'] as const
 export type ViewId = (typeof VIEW_IDS)[number]
 export const isViewId = (v: unknown): v is ViewId => typeof v === 'string' && (VIEW_IDS as readonly string[]).includes(v)
 

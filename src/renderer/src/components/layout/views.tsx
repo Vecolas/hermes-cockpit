@@ -21,8 +21,10 @@ export interface ViewDef {
 export const VIEWS: ViewDef[] = [
   { id: 'chat', label: 'Chat', icon: '◆', key: '1', hint: 'chat do bot selecionado' },
   { id: 'swarm', label: 'Swarm', icon: '⋮⋮', key: '2', hint: 'runs de Claude Code e subagents' },
-  { id: 'ops', label: 'Ops', icon: '⌁', key: '3', hint: 'modelos, portas, processos, repos, containers' },
-  { id: 'transcrever', label: 'Transcrever', icon: '◉', key: '4', hint: 'transcriber local: arquivo, YouTube, tempo real' },
+  { id: 'automacoes', label: 'Automações', icon: '⟳', key: '3', hint: 'crons, blueprints, kanban e workflows salvos' },
+  { id: 'notion', label: 'Notion', icon: 'N', key: '4', hint: 'tarefas, busca e páginas do Notion' },
+  { id: 'ops', label: 'Ops', icon: '⌁', key: '5', hint: 'modelos, portas, processos, repos, containers' },
+  { id: 'transcrever', label: 'Transcrever', icon: '◉', key: '6', hint: 'transcriber local: arquivo, YouTube, tempo real' },
 ]
 
 const ActiveCtx = createContext(true)

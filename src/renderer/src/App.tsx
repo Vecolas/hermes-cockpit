@@ -11,6 +11,8 @@ import { ResizeHandle, useCollapseSync } from './components/layout/ResizeHandle'
 import { SettingsPanel } from './components/layout/SettingsPanel'
 import { useSwarmBadge } from './components/layout/useSwarmBadge'
 import { VIEWS, ViewSlot } from './components/layout/views'
+import { AutomationsView } from './components/automations/AutomationsView'
+import { NotionView } from './components/notion/NotionView'
 import { OpsView } from './components/ops/OpsView'
 import { SwarmView } from './components/swarm/SwarmView'
 import { TranscriberView } from './components/transcriber/TranscriberView'
@@ -625,6 +627,12 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
                     <ErrorBoundary label="Swarm">
                       <SwarmView rpc={rpc} />
                     </ErrorBoundary>
+                  </ViewSlot>
+                  <ViewSlot id="automacoes" active={view === 'automacoes'}>
+                    <AutomationsView rpc={rpc} />
+                  </ViewSlot>
+                  <ViewSlot id="notion" active={view === 'notion'}>
+                    <NotionView rpc={rpc} />
                   </ViewSlot>
                   <ViewSlot id="ops" active={view === 'ops'}>
                     <ErrorBoundary label="Ops">
