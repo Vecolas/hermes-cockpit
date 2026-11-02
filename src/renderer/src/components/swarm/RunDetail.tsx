@@ -3,7 +3,6 @@ import { nextStep, retryRun } from '../../lib/flow'
 import { invoke } from '../../lib/ipc'
 import {
   errMsg,
-  fmtCost,
   fmtDuration,
   isActive,
   refreshSwarm,
@@ -17,6 +16,7 @@ import {
   type Approval,
   type RunMeta,
 } from '../../lib/swarm'
+import { fmtRunTokens, tokenBreakdown } from '../../lib/swarm-tokens'
 import { toast } from '../../lib/toast'
 import { RunDiff } from './RunDiff'
 import { RunStream } from './RunStream'
@@ -138,7 +138,9 @@ export function RunDetail({
           )}
           <span>{fmtDuration(runElapsedMs(run, now))}</span>
           {run.numTurns != null && <span>{run.numTurns} turnos</span>}
-          <span>{fmtCost(run.costUsd)}</span>
+          {run.tokensTotal != null && (
+            <span title={tokenBreakdown(run)}>{fmtRunTokens(run.tokensTotal)}</span>
+          )}
           {run.requestedBy && (
             <span>
               via {run.requestedBy.via}

@@ -4,7 +4,6 @@ import {
   STATUS_LABEL,
   STATUS_TONE,
   errMsg,
-  fmtCost,
   fmtDuration,
   isActive,
   repoName,
@@ -15,6 +14,7 @@ import {
   type Approval,
   type RunMeta,
 } from '../../lib/swarm'
+import { fmtRunTokens } from '../../lib/swarm-tokens'
 import { toast } from '../../lib/toast'
 import { buildItems } from './RunStream'
 import { ConfirmButton, StatusDot } from './ui'
@@ -213,7 +213,7 @@ const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMe
           <span className={run.permissionMode === 'bypass' ? 'text-alert' : 'text-phos'}>{run.permissionMode}</span>
         )}
         <span className="tabular-nums">{fmtDuration(runElapsedMs(run, now))}</span>
-        <span>{fmtCost(run.costUsd)}</span>
+        {run.tokensTotal != null && <span>{fmtRunTokens(run.tokensTotal)}</span>}
         <span className="ml-auto flex gap-1 opacity-70 transition-opacity group-hover:opacity-100">
           <MiniBtn onClick={() => openHere(run, active ? 'watch' : 'resume')} title={active ? 'seguir ao vivo no terminal do app (dock)' : 'claude --resume interativo no terminal do app (dock)'}>
             ▣ abrir aqui
@@ -277,7 +277,7 @@ function termLines(items: Item[]): { text: string; cls: string }[] {
         .join(' · ')
       out.push({ text: `${it.done ? '✓' : '⟳'} ${it.text}${meta ? `  [${meta}]` : ''}`, cls: it.done ? 'text-phos' : 'text-amber' })
     } else if (it.k === 'result')
-      out.push({ text: `■ ${it.ok ? 'concluída' : it.subtype ?? 'erro'} · ${it.turns ?? '?'} turnos · ${fmtCost(it.cost)}`, cls: it.ok ? 'text-phos' : 'text-alert' })
+      out.push({ text: `■ ${it.ok ? 'concluída' : it.subtype ?? 'erro'} · ${it.turns ?? '?'} turnos${it.tokens != null ? ` · ${fmtRunTokens(it.tokens)}` : ''}`, cls: it.ok ? 'text-phos' : 'text-alert' })
   }
   return out.slice(-60)
 }

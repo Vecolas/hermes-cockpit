@@ -23,6 +23,7 @@ import {
   eventsPath,
   normalizePermissionMode,
 } from './state.mjs'
+import { runUsage } from './usage.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 export const RUNNER = join(HERE, '..', 'run.mjs')
@@ -284,6 +285,12 @@ export function diffStat(meta) {
   }
 }
 
+/** Tokens reais da run (meta do runner ou backfill lazy do último result). */
+function tokensOf(m) {
+  const u = runUsage(runDir(m.id), m, { terminal: TERMINAL.has(m.status) })
+  return u ? { tokensTotal: u.tokensTotal, ...(u.tokenUsage ? { tokenUsage: u.tokenUsage } : {}) } : {}
+}
+
 export function summary(meta) {
   const m = effective(meta)
   const pending = listApprovals({ runId: m.id, status: 'pending' })
@@ -298,6 +305,7 @@ export function summary(meta) {
     createdAt: m.createdAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
     ...(m.numTurns != null ? { numTurns: m.numTurns } : {}),
+    ...tokensOf(m),
     ...(m.costUsd != null ? { costUsd: m.costUsd } : {}),
     ...(m.error ? { error: m.error } : {}),
     ...(pending.length ? { pendingApprovals: pending.map((a) => ({ id: a.id, toolName: a.toolName })) } : {}),
@@ -315,6 +323,7 @@ export function result(runId) {
     isolation: m.isolation ?? null,
     diffStat: diffStat(m),
     ...(m.error ? { error: m.error } : {}),
+    ...tokensOf(m),
     ...(m.costUsd != null ? { costUsd: m.costUsd } : {}),
   }
 }

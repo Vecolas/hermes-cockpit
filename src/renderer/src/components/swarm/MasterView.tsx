@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { botTitle } from '../../lib/bots'
 import type { HermesDelegation } from '../../lib/delegation'
-import { errMsg, fmtCost, isActive, useNow, type RunMeta, type SwarmState } from '../../lib/swarm'
+import { errMsg, isActive, useNow, type RunMeta, type SwarmState } from '../../lib/swarm'
+import { fmtTokens, tokensInWindow } from '../../lib/swarm-tokens'
 import { toast } from '../../lib/toast'
 import { CountUp, cx, EmptyState } from '../ui'
 import { buildLog, Column, FinishedRow, LiveRunCard, LogFeed, SubCard } from './MasterCards'
@@ -58,8 +59,8 @@ export function MasterView({
   const failures = ended.filter((r) => r.status === 'error' && now - endedAt(r) < FAIL_WINDOW).slice(0, 3)
   const finished = [...ended].sort((a, b) => endedAt(b) - endedAt(a)).slice(0, MAX_FINISHED)
   const doneToday = recent.filter((r) => r.status === 'done').length
-  const costRuns = s.runs.filter((r) => r.costUsd != null && now - (Date.parse(r.createdAt) || 0) < DAY)
-  const cost24 = costRuns.length ? costRuns.reduce((n, r) => n + (r.costUsd ?? 0), 0) : null
+  // consumo em tokens reais (soma do result de cada run); runs sem dado ficam fora e são contadas no hint
+  const tok24 = tokensInWindow(s.runs, now, DAY)
   const approvals = crew ? s.approvals.filter((a) => { const r = s.runs.find((x) => x.id === a.runId); return !r || whoOf(r) === crew }) : s.approvals
   const subs = crew ? [] : deleg.tree
   const inField = active.length + subs.length
@@ -133,7 +134,18 @@ export function MasterView({
           <Stat label="em campo" value={inField} tone={inField ? 'text-phos' : 'text-faint'} />
           <Stat label="com você" value={needYou} tone={needYou ? 'text-amber' : 'text-faint'} />
           <Stat label="entregues 24h" value={doneToday} tone={doneToday ? 'text-cyanic' : 'text-faint'} />
-          <Stat label="custo 24h" value={cost24} tone="text-ink" format={(n) => fmtCost(n).replace('US$ ', '$')} />
+          <Stat
+            label="tokens 24h"
+            value={tok24.total}
+            tone={tok24.total != null ? 'text-ink' : 'text-faint'}
+            format={(n) => fmtTokens(Math.round(n))}
+            hint={
+              tok24.total == null
+                ? 'sem dado de tokens nas runs das últimas 24h'
+                : `${tok24.total.toLocaleString('pt-BR')} tokens (input + output + cache) em ${tok24.counted} run(s)` +
+                  (tok24.missing ? ` · ${tok24.missing} sem dado de tokens` : '')
+            }
+          />
         </dl>
       </header>
 
@@ -251,7 +263,7 @@ export function MasterView({
 
         <Column kicker="terminou" title="Entregue" count={recent.length} tone="cyanic">
           {!finished.length ? (
-            <EmptyState compact title="nada terminou ainda" detail="Resultados, falhas e cancelamentos aparecem aqui com resumo e custo." />
+            <EmptyState compact title="nada terminou ainda" detail="Resultados, falhas e cancelamentos aparecem aqui com resumo e tokens." />
           ) : (
             finished.map((r) => <FinishedRow key={r.id} run={r} now={now} onOpen={() => onOpenRun(r.id)} onRetried={onOpenRun} />)
           )}
@@ -270,9 +282,9 @@ export function MasterView({
   )
 }
 
-function Stat({ label, value, tone, format }: { label: string; value: number | null; tone: string; format?: (n: number) => string }) {
+function Stat({ label, value, tone, format, hint }: { label: string; value: number | null; tone: string; format?: (n: number) => string; hint?: string }) {
   return (
-    <div className="hc-card min-w-[92px] px-3 py-2">
+    <div className="hc-card min-w-[92px] px-3 py-2" title={hint}>
       <dt className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">{label}</dt>
       <dd className={cx('mt-0.5 font-mono text-[22px] leading-none', tone)}>
         <CountUp value={value} format={format} />

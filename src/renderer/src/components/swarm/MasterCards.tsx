@@ -2,7 +2,6 @@ import { memo, useMemo, type ReactNode } from 'react'
 import { epochMs, subLabel, subTone, SUB_TERMINAL, type ActiveSub, type LiveInfo } from '../../lib/delegation'
 import { ago, retryRun } from '../../lib/flow'
 import {
-  fmtCost,
   fmtDuration,
   repoName,
   runElapsedMs,
@@ -12,6 +11,7 @@ import {
   type Approval,
   type RunMeta,
 } from '../../lib/swarm'
+import { fmtRunTokens } from '../../lib/swarm-tokens'
 import { useViewActive } from '../layout/views'
 import { cx } from '../ui'
 import { FlowRail } from './flow'
@@ -189,7 +189,7 @@ export function FinishedRow({ run, now, onOpen, onRetried }: { run: RunMeta; now
         <span className="mt-0.5 flex gap-2 pl-3.5 text-[10px] text-faint">
           <span className={STATUS_TONE[run.status].text}>{runHandle(run)}</span>
           <span>{fmtDuration(runElapsedMs(run, now))}</span>
-          {run.costUsd != null && <span>{fmtCost(run.costUsd)}</span>}
+          {run.tokensTotal != null && <span>{fmtRunTokens(run.tokensTotal)}</span>}
         </span>
       </button>
       {!ok && (

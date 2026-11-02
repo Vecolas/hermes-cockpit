@@ -4,6 +4,7 @@
 // imprime o stream-json do Claude Code colorido. Sai quando a run termina.
 import { existsSync, openSync, readSync, fstatSync, closeSync } from 'node:fs'
 import { eventsPath, readMeta, TERMINAL } from './lib/state.mjs'
+import { usageFromResult } from './lib/usage.mjs'
 
 const id = process.argv[2]
 if (!id || !/^r-[\w-]+$/.test(id)) {
@@ -51,7 +52,8 @@ function render(ev) {
     }
   } else if (ev.type === 'result') {
     const ok = ev.subtype === 'success' && !ev.is_error
-    out(`\n${ok ? C.green : C.red}${C.bold}■ ${ok ? 'concluída' : ev.subtype ?? 'erro'}${C.reset} ${C.dim}· ${ev.num_turns ?? '?'} turnos · US$ ${(ev.total_cost_usd ?? 0).toFixed(4)}${C.reset}`)
+    const tok = usageFromResult(ev)?.tokensTotal
+    out(`\n${ok ? C.green : C.red}${C.bold}■ ${ok ? 'concluída' : ev.subtype ?? 'erro'}${C.reset} ${C.dim}· ${ev.num_turns ?? '?'} turnos${tok != null ? ` · ${tok.toLocaleString('pt-BR')} tokens` : ''}${C.reset}`)
   }
 }
 

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useHermesDelegation } from '../../lib/delegation'
 import type { HermesRpc } from '../../lib/rpc'
 import {
-  fmtCost,
   fmtDuration,
   isActive,
   repoName,
@@ -14,6 +13,7 @@ import {
   type Approval,
   type RunMeta,
 } from '../../lib/swarm'
+import { fmtRunTokens } from '../../lib/swarm-tokens'
 import { useViewActive } from '../layout/views'
 import { Badge, cx, EmptyState, Tabs, type TabItem } from '../ui'
 import { FlowRail } from './flow'
@@ -526,7 +526,7 @@ function RunRow({
         </span>
         <span className="ml-auto shrink-0">
           {r.numTurns != null ? `${r.numTurns}t · ` : ''}
-          {r.costUsd != null ? fmtCost(r.costUsd) : ''}
+          {r.tokensTotal != null ? fmtRunTokens(r.tokensTotal) : ''}
         </span>
       </span>
     </button>

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { STATUS_LABEL, errMsg, fmtCost, fmtDuration, isActive, runElapsedMs, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
+import { fmtRunTokens } from '../../lib/swarm-tokens'
+import { STATUS_LABEL, errMsg, fmtDuration, isActive, runElapsedMs, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
 import { invoke } from '../../lib/ipc'
 import { toast } from '../../lib/toast'
 import { requestTerminal } from '../devtools/TerminalTab'
@@ -542,14 +543,15 @@ function DelegationStrip({ tool }: { tool: ToolItem }) {
   const runs = ids.map((id) => s.runs.find((r) => r.id === id)).filter((r): r is RunMeta => Boolean(r))
   const anyActive = runs.some((r) => isActive(r.status))
   const now = useNow(1000, anyActive)
-  const totalCost = runs.reduce((acc, r) => acc + (r.costUsd ?? 0), 0)
+  const withTok = runs.filter((r) => r.tokensTotal != null)
+  const totalTokens = withTok.length ? withTok.reduce((acc, r) => acc + (r.tokensTotal ?? 0), 0) : null
   if (!ids.length) return null
   return (
     <div className="hc-fade-in border-t border-edge/60 bg-void/40 px-2.5 py-1.5">
       <div className="mb-1 flex items-center gap-2 text-[10px]">
         <span className={`h-1.5 w-1.5 rotate-45 ${anyActive ? 'hc-pulse-dot bg-phos' : 'bg-faint'}`} />
         <span className="label text-[9.5px]">delegado ao Claude Code · {ids.length} instância(s)</span>
-        {totalCost > 0 && <span className="tabular-nums text-faint">{fmtCost(totalCost)}</span>}
+        {totalTokens != null && <span className="tabular-nums text-faint">{fmtRunTokens(totalTokens)}</span>}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('hc:view', { detail: 'swarm' }))}
@@ -588,7 +590,7 @@ function DelegationRow({ id, run: r, now }: { id: string; run: RunMeta | undefin
         {r && <span className={`shrink-0 ${r.status === 'error' ? 'text-alert' : r.status === 'waiting_approval' ? 'text-amber' : 'text-faint'}`}>{STATUS_LABEL[r.status]}</span>}
         {r?.numTurns != null && <span className="shrink-0 tabular-nums text-faint">{r.numTurns}t</span>}
         {r && <span className="shrink-0 tabular-nums text-faint">{fmtDuration(runElapsedMs(r, now))}</span>}
-        {r?.costUsd != null && <span className="shrink-0 tabular-nums text-dim">{fmtCost(r.costUsd)}</span>}
+        {r?.tokensTotal != null && <span className="shrink-0 tabular-nums text-dim">{fmtRunTokens(r.tokensTotal)}</span>}
         <button
           type="button"
           onClick={() => openHere(active ? 'watch' : 'resume')}

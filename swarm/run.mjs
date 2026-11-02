@@ -14,6 +14,7 @@ import { basename, isAbsolute, join, relative } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { resolveBin } from './lib/runs.mjs'
+import { usageFromResult } from './lib/usage.mjs'
 import {
   STATE_DIR,
   WORKTREES_DIR,
@@ -276,6 +277,8 @@ function main() {
         numTurns: ev.num_turns,
         costUsd: ev.total_cost_usd ?? ev.cost_usd,
         durationMs: ev.duration_ms,
+        // tokens reais do result (input/output/cache) — consumo exibido no cockpit
+        ...(usageFromResult(ev) ?? {}),
       })
     }
   })

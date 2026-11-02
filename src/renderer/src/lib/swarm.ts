@@ -32,7 +32,16 @@ export interface RunMeta {
   startedAt?: string
   endedAt?: string
   numTurns?: number
+  /** Interno: US$ reportado pelo claude. Não exibir como consumo (regra: US$ só em cotas de créditos). */
   costUsd?: number
+  /** Soma real input+output+cache_creation+cache_read do último result (ausente = sem dado). */
+  tokensTotal?: number
+  tokenUsage?: {
+    inputTokens?: number
+    outputTokens?: number
+    cacheCreationInputTokens?: number
+    cacheReadInputTokens?: number
+  }
   durationMs?: number
   resultText?: string
   error?: string
@@ -151,11 +160,6 @@ export function fmtDuration(ms: number | null | undefined): string {
   const mm = String(m).padStart(2, '0')
   const ss = String(s).padStart(2, '0')
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
-}
-
-export function fmtCost(usd: number | null | undefined): string {
-  if (usd == null) return '—'
-  return usd < 0.01 ? `US$ ${usd.toFixed(4)}` : `US$ ${usd.toFixed(2)}`
 }
 
 export function repoName(path: string | undefined): string {

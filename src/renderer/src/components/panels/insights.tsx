@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../lib/ipc'
 import { agendaPath, inSpace, spaceOfAccount, spaceOfBot, spaceOfPath, useSpace, type ItemSpace } from '../../lib/space'
-import { fmtCost, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
+import { useNow, useSwarm, type RunMeta } from '../../lib/swarm'
 import { cx } from '../ui/cx'
 import { CountUp, Gauge, Sparkline } from '../ui/Viz'
 import { PanelFrame } from './PanelFrame'
@@ -274,22 +274,27 @@ export function SwarmActivityWidget(props: WidgetProps) {
   const space = useSpace()
   const now = useNow(60_000)
   const runs = s.runs.filter((r) => inSpace(spaceOfRun(r), space))
-  const { counts, costs, total, cost } = useMemo(() => {
+  const { counts, toks, total, tokens, tokenRuns } = useMemo(() => {
     const counts = Array<number>(HOURS).fill(0)
-    const costs = Array<number>(HOURS).fill(0)
+    const toks = Array<number>(HOURS).fill(0)
     const t0 = now - HOURS * 3_600_000
     let total = 0
-    let cost = 0
+    let tokens = 0
+    let tokenRuns = 0
     for (const r of runs) {
       const t = new Date(r.startedAt ?? r.createdAt).getTime()
       if (Number.isNaN(t) || t < t0) continue
       const i = Math.min(HOURS - 1, Math.floor((t - t0) / 3_600_000))
       counts[i] += 1
-      costs[i] += r.costUsd ?? 0
       total += 1
-      cost += r.costUsd ?? 0
+      // tokens reais do result; runs sem dado não somam (nada estimado)
+      if (typeof r.tokensTotal === 'number') {
+        toks[i] += r.tokensTotal
+        tokens += r.tokensTotal
+        tokenRuns += 1
+      }
     }
-    return { counts, costs, total, cost }
+    return { counts, toks, total, tokens: tokenRuns ? tokens : null, tokenRuns }
   }, [runs, now])
   const activeN = runs.filter((r) => r.status === 'running' || r.status === 'queued' || r.status === 'waiting_approval').length
   const unavailable = s.phase === 'unavailable'
@@ -322,14 +327,16 @@ export function SwarmActivityWidget(props: WidgetProps) {
         </div>
         <div className="flex min-w-0 flex-col">
           <div className="flex items-baseline gap-1.5">
-            <CountUp value={cost} format={(n) => fmtCost(n)} className="text-[18px] leading-none text-ink" />
-            <span className="text-[10px] text-faint">custo</span>
+            <CountUp value={tokens} format={(n) => fmtTokens(Math.round(n))} className="text-[18px] leading-none text-ink" />
+            <span className="text-[10px] text-faint" title={tokens == null ? 'sem dado de tokens nas runs da janela' : `${tokenRuns} run(s) com dado de tokens`}>
+              tokens
+            </span>
           </div>
           <div className="mt-1.5 h-8 min-h-0 flex-1">
             <Sparkline
-              values={cost > 0 ? costs : []}
+              values={tokens ? toks : []}
               color="var(--color-amber)"
-              title={`custo por hora (US$): ${costs.map((c) => c.toFixed(2)).join(', ')}`}
+              title={`tokens por hora: ${toks.map((c) => fmtTokens(c)).join(', ')}`}
             />
           </div>
         </div>

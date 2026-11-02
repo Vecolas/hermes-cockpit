@@ -1,5 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { fmtCost, fmtDuration, type SwarmEventLine } from '../../lib/swarm'
+import { fmtDuration, type SwarmEventLine } from '../../lib/swarm'
+import { fmtRunTokens, resultTokens } from '../../lib/swarm-tokens'
 import { Markdown } from '../chat/Markdown'
 import { prettyJson, SkeletonRows, summarizeInput } from './ui'
 
@@ -20,7 +21,7 @@ type Item =
       key: string
       ok: boolean
       subtype?: string
-      cost?: number
+      tokens?: number
       turns?: number
       durationMs?: number
       text?: string
@@ -124,7 +125,7 @@ export function buildItems(lines: SwarmEventLine[]): Item[] {
         key: `r${i}`,
         ok: ev.is_error !== true && (ev.subtype === undefined || ev.subtype === 'success'),
         subtype: typeof ev.subtype === 'string' ? ev.subtype : undefined,
-        cost: typeof ev.total_cost_usd === 'number' ? ev.total_cost_usd : typeof ev.cost_usd === 'number' ? ev.cost_usd : undefined,
+        tokens: resultTokens(ev),
         turns: typeof ev.num_turns === 'number' ? ev.num_turns : undefined,
         durationMs: typeof ev.duration_ms === 'number' ? ev.duration_ms : undefined,
         text: typeof ev.result === 'string' ? ev.result : undefined,
@@ -227,7 +228,7 @@ const ItemView = memo(function ItemView({ it, compact }: { it: Item; compact: bo
         >
           <div className="flex flex-wrap items-baseline gap-x-3 text-[11px]">
             <span className={it.ok ? 'text-phos' : 'text-alert'}>{it.ok ? '● resultado' : `● ${it.subtype ?? 'erro'}`}</span>
-            <span className="text-dim">{fmtCost(it.cost)}</span>
+            {it.tokens != null && <span className="text-dim">{fmtRunTokens(it.tokens)}</span>}
             {it.turns != null && <span className="text-faint">{it.turns} turnos</span>}
             {it.durationMs != null && <span className="text-faint">{fmtDuration(it.durationMs)}</span>}
           </div>

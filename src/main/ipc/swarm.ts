@@ -18,6 +18,7 @@ import { homedir } from 'node:os'
 import { exeNames, extraBinDirs, IS_MAC, IS_WIN } from '../platform'
 import { delimiter, join } from 'node:path'
 import { broadcast, handle } from './index'
+import { withUsage, type TokenUsage } from '../../../swarm/lib/usage.mjs'
 
 const HOME = homedir()
 const COCKPIT_DIR = join(HOME, '.hermes', 'cockpit')
@@ -50,7 +51,11 @@ export interface RunMeta {
   startedAt?: string
   endedAt?: string
   numTurns?: number
+  /** Interno (não exibido como consumo): US$ reportado pelo claude. */
   costUsd?: number
+  /** Soma real de input+output+cache_creation+cache_read do último result. */
+  tokensTotal?: number
+  tokenUsage?: TokenUsage
   durationMs?: number
   resultText?: string
   error?: string
@@ -142,7 +147,11 @@ function listRuns(limit: number): RunMeta[] {
     }
   }
   out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))
-  return out.slice(0, limit)
+  // Tokens: meta (runner novo) ou backfill lazy do último result, com cache por run
+  // (usage.json + memória, invalidado por tamanho/mtime de events.jsonl).
+  return out
+    .slice(0, limit)
+    .map((m) => (ID_RE.test(m.id) ? withUsage(m, join(RUNS_DIR, m.id), { terminal: TERMINAL.has(m.status) }) : m))
 }
 
 function readEvents(runId: string, fromLine: number): { lines: { ts: string; ev: unknown }[]; next: number } {
