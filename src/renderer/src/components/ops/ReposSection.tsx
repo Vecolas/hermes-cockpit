@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { invoke } from '../../lib/ipc'
 import { errMsg, ops, type RepoDetail, type RepoRow } from '../../lib/ops'
 import { toast } from '../../lib/toast'
+import { inSpace, spaceOfPath, useSpace } from '../../lib/space'
 import { Btn, EmptyState, ErrorState, SectionHeader, SkeletonRows, Tag, useAsync } from './ui'
 
 // Projetos & repos: varredura de ~/dev e ~/Documents (prof. 3, cache 60s no
@@ -26,14 +27,16 @@ export function ReposSection({ onCount }: { onCount?: (n: number) => void }) {
   }, [s.data, onCount])
 
   const f = q.trim().toLowerCase()
+  const space = useSpace()
   const shown = useMemo(
     () =>
       (s.data ?? []).filter((r) => {
+        if (!inSpace(spaceOfPath(r.path), space)) return false
         if (filter === 'sujos' && !r.dirty) return false
         if (filter === 'fora' && !(r.ahead || r.behind)) return false
         return !f || r.name.toLowerCase().includes(f) || r.path.toLowerCase().includes(f) || (r.branch ?? '').toLowerCase().includes(f)
       }),
-    [s.data, filter, f],
+    [s.data, filter, f, space],
   )
   const dirtyN = (s.data ?? []).filter((r) => r.dirty).length
   const outN = (s.data ?? []).filter((r) => r.ahead || r.behind).length

@@ -8,7 +8,7 @@ import { StatusStrip } from './components/StatusStrip'
 import { TopBar } from './components/TopBar'
 import { CommandPalette, type PaletteItem, type PaletteSource } from './components/layout/CommandPalette'
 import { ResizeHandle, useCollapseSync } from './components/layout/ResizeHandle'
-import { SettingsPanel } from './components/layout/SettingsPanel'
+import { SettingsPanel, type SettingsTab } from './components/layout/SettingsPanel'
 import { useSwarmBadge } from './components/layout/useSwarmBadge'
 import { VIEWS, ViewSlot } from './components/layout/views'
 import { AutomationsView } from './components/automations/AutomationsView'
@@ -16,6 +16,7 @@ import { NotionView } from './components/notion/NotionView'
 import { OpsView } from './components/ops/OpsView'
 import { SwarmView } from './components/swarm/SwarmView'
 import { TranscriberView } from './components/transcriber/TranscriberView'
+import { VoiceOverlay } from './components/voice/VoiceOverlay'
 import { Toaster } from './components/ui/Toaster'
 import { RegionView } from './components/panels/RegionView'
 import { SourceProvider, usePluginSource } from './components/panels/source'
@@ -33,10 +34,12 @@ import {
   loadPrefs,
   safeStorage,
   savePrefs,
+  visibleViews,
   type UiPrefs,
   type ViewId,
 } from './lib/layout'
-import { loadRegions, resetRegions, saveRegions, type RegionLayout } from './lib/panels'
+import { LAYOUT_PRESETS, loadRegions, resetRegions, saveRegions, type RegionLayout } from './lib/panels'
+import { SPACES, SPACE_ORDER, inSpace, setSpace, spaceOfBot, useSpace, type Space } from './lib/space'
 import { HermesRpc, type ConnState } from './lib/rpc'
 import { toast } from './lib/toast'
 import {
@@ -142,25 +145,44 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
     }
   }, [rpc, connState])
 
+  // ─── espaço (Pessoal | Houer | Tudo): filtra bots; layout e prefs são por espaço ──
+  const space = useSpace()
+
   const bots = useMemo(() => mergePluginBots(rpcBots, pluginBots.data), [rpcBots, pluginBots.data])
+  const spaceBots = useMemo(() => bots.filter((b) => inSpace(spaceOfBot(b.name), space)), [bots, space])
   const bot = bots.find((b) => b.name === selected) ?? null
   const botsLoading = !conn || (connState === 'connecting' && bots.length === 0)
   const railError = botsErr ?? (pluginBots.error ? `/bots: ${pluginBots.error}` : null)
+  // bot selecionado saiu do espaço → seleciona o primeiro do espaço (chief é compartilhado)
+  useEffect(() => {
+    if (spaceBots.length && !spaceBots.some((b) => b.name === selected)) setSelected(spaceBots[0].name)
+  }, [spaceBots, selected])
 
-  // ─── layout: prefs, regiões, breakpoint ───────────────────────────────────
-  const [prefs, setPrefsState] = useState<UiPrefs>(loadPrefs)
+  // ─── layout: prefs + regiões POR ESPAÇO, breakpoint ───────────────────────
+  // Estado guarda a qual espaço pertence; trocar de espaço recarrega (ajuste
+  // de estado durante o render — sem frame com o layout do espaço anterior).
+  const [ps, setPs] = useState(() => ({ space, prefs: loadPrefs(space), regions: loadRegions(space) }))
+  const [spaceFlash, setSpaceFlash] = useState(0)
+  if (ps.space !== space) {
+    setPs({ space, prefs: loadPrefs(space), regions: loadRegions(space) })
+    setSpaceFlash((n) => n + 1)
+  }
+  const prefs = ps.prefs
+  const regions = ps.regions
   const setPrefs = useCallback((patch: Partial<UiPrefs> | ((p: UiPrefs) => Partial<UiPrefs>)) => {
-    setPrefsState((p) => {
-      const next = { ...p, ...(typeof patch === 'function' ? patch(p) : patch) }
-      savePrefs(next)
-      return next
+    setPs((s) => {
+      const next = { ...s.prefs, ...(typeof patch === 'function' ? patch(s.prefs) : patch) }
+      savePrefs(next, s.space)
+      return { ...s, prefs: next }
     })
   }, [])
-  const [regions, setRegionsState] = useState<RegionLayout>(loadRegions)
-  const setRegions = (r: RegionLayout) => {
-    setRegionsState(r)
-    saveRegions(r)
-  }
+  const setRegions = useCallback((r: RegionLayout) => {
+    setPs((s) => {
+      saveRegions(r, s.space)
+      return { ...s, regions: r }
+    })
+  }, [])
+  const setRegionsState = (r: RegionLayout) => setPs((s) => ({ ...s, regions: r }))
 
   const narrow = useNarrow(theme.scale)
   const [railOverlay, setRailOverlay] = useState(false)
@@ -173,7 +195,18 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   }, [narrow])
 
   const [palette, setPalette] = useState(false)
-  const [settings, setSettings] = useState<null | 'aparencia' | 'paineis'>(null)
+  const [settings, setSettings] = useState<null | SettingsTab>(null)
+
+  // ─── voz: overlay global; abre/fecha por botão, ⌘⇧V ou evento hc:voice ─────
+  const [voiceOpen, setVoiceOpen] = useState(false)
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ open?: boolean } | undefined>).detail
+      setVoiceOpen((v) => (typeof d?.open === 'boolean' ? d.open : !v))
+    }
+    window.addEventListener('hc:voice', on)
+    return () => window.removeEventListener('hc:voice', on)
+  }, [])
 
   const focus = prefs.focus
   const railVisible = prefs.railOpen && !focus && !narrow
@@ -208,9 +241,24 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   const toggleFocus = () => setPrefs((p) => ({ focus: !p.focus }))
   const bumpScale = (d: number) => setTheme((t) => ({ ...t, scale: clampScale(d === 0 ? 100 : t.scale + d) }))
 
-  // ─── views da área central (Chat · Swarm · Ops · Transcrever) ─────────────
+  // ─── views da área central (ordem/visibilidade por espaço) ─────────────────
+  const views = visibleViews(prefs)
+  // view escondida continua acessível pelo ⌘K / hc:view; só cai no 1º se nada pedir
   const view = prefs.view
   const setView = useCallback((v: ViewId) => setPrefs({ view: v }), [setPrefs])
+  const reorderViews = (visibleOrder: ViewId[]) => {
+    // mantém as escondidas nas posições relativas: visíveis na nova ordem, escondidas no fim
+    const hidden = prefs.viewOrder.filter((v) => prefs.hiddenViews.includes(v))
+    setPrefs({ viewOrder: [...visibleOrder, ...hidden] })
+  }
+  const applyPreset = (id: string) => {
+    const pr = LAYOUT_PRESETS.find((x) => x.id === id)
+    if (!pr) return
+    setPrefs({ ...pr.prefs, view: pr.view })
+    setRegions(pr.regions)
+    const sp = SPACES.find((x) => x.id === space)?.label ?? space
+    toast({ title: `Layout ${pr.label}`, detail: `${pr.hint} — espaço ${sp}`, tone: 'ok' })
+  }
   const swarmBadge = useSwarmBadge()
 
   // Intents para componentes de outros donos via window CustomEvent (hc:*).
@@ -270,6 +318,10 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
       e.preventDefault()
       fn()
     }
+    // ⌘⇧1/2/3 → espaço (e.code: com shift o e.key vira !, @, #)
+    const digit = /^Digit([1-9])$/.exec(e.code)?.[1]
+    if (e.shiftKey && digit && Number(digit) <= SPACE_ORDER.length) return act(() => setSpace(SPACE_ORDER[Number(digit) - 1]))
+    if (e.shiftKey && k === 'v') return act(() => setVoiceOpen((v) => !v))
     if (k === 'k') act(() => setPalette((v) => !v))
     else if (k === '.') act(toggleFocus)
     else if (k === '=' || k === '+') act(() => bumpScale(SCALE_STEP))
@@ -278,7 +330,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
     else if (k === 'b' && !e.shiftKey) act(toggleRail)
     else if (k === 'j' && !e.shiftKey) act(toggleDock)
     else if (k === ',') act(() => setSettings('aparencia'))
-    else if (/^[1-9]$/.test(k) && !e.shiftKey && VIEWS[Number(k) - 1]) act(() => setView(VIEWS[Number(k) - 1].id))
+    else if (/^[1-9]$/.test(k) && !e.shiftKey && views[Number(k) - 1]) act(() => setView(views[Number(k) - 1]))
     // ⌘T de qualquer view: volta ao Chat; o ChatPane (sempre montado) cria a conversa nova.
     else if (k === 't' && !e.shiftKey) setView('chat')
   }
@@ -295,23 +347,57 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   }
   const resetLayout = () => {
     resetSizes()
-    setRegionsState(resetRegions())
-    toast({ title: 'Layout restaurado', detail: 'tamanhos, painéis abertos e blocos das regiões voltaram ao padrão', tone: 'ok' })
+    setRegionsState(resetRegions(space))
+    toast({ title: 'Layout restaurado', detail: 'tamanhos, painéis abertos e blocos das regiões voltaram ao padrão do espaço', tone: 'ok' })
   }
 
   const paletteItems: PaletteItem[] = [
-    ...VIEWS.map((v) => ({
-      id: `view:${v.id}`,
-      group: 'Views',
-      icon: v.icon,
-      label: `Ir para ${v.label}`,
-      hint: v.id === view ? 'atual' : undefined,
-      keywords: `${v.id} ${v.hint}`,
-      shortcut: ['⌘', v.key],
-      preview: { title: v.label, body: v.hint },
-      run: () => setView(v.id),
+    ...VIEWS.map((v) => {
+      const pos = views.indexOf(v.id)
+      return {
+        id: `view:${v.id}`,
+        group: 'Views',
+        icon: v.glyph,
+        label: `Ir para ${v.label}`,
+        hint: v.id === view ? 'atual' : pos < 0 ? 'escondida da barra' : undefined,
+        keywords: `${v.id} ${v.hint}`,
+        shortcut: pos >= 0 && pos < 9 ? ['⌘', String(pos + 1)] : undefined,
+        preview: { title: v.label, body: v.hint },
+        run: () => setView(v.id),
+      }
+    }),
+    ...SPACE_ORDER.map((id, i) => {
+      const d = SPACES.find((x) => x.id === id)!
+      return {
+        id: `space:${id}`,
+        group: 'Espaço',
+        icon: id === space ? '●' : '○',
+        label: `Espaço ${d.label}`,
+        hint: id === space ? 'atual' : d.hint,
+        keywords: `espaço space ${id} ${d.hint}`,
+        shortcut: ['⌘', '⇧', String(i + 1)],
+        run: () => setSpace(id as Space),
+      }
+    }),
+    ...LAYOUT_PRESETS.map((pr) => ({
+      id: `preset:${pr.id}`,
+      group: 'Layout',
+      icon: '▦',
+      label: `Preset ${pr.label}`,
+      keywords: `layout preset ${pr.hint}`,
+      preview: { title: `Preset ${pr.label}`, body: pr.hint },
+      run: () => applyPreset(pr.id),
     })),
-    ...bots.map((b) => ({
+    {
+      id: 'act:voice',
+      group: 'Ações',
+      icon: '◉',
+      label: voiceOpen ? 'Fechar modo voz' : 'Modo voz',
+      keywords: 'voz voice falar microfone',
+      shortcut: ['⌘', '⇧', 'V'],
+      run: () => setVoiceOpen((v) => !v),
+    },
+    ...spaceBots.map((b) => ({
       id: `bot:${b.name}`,
       group: 'Bots',
       icon: b.rodando ? '●' : '◇',
@@ -396,6 +482,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
     { id: 'zoom-out', group: 'Tema', icon: '−', label: 'Diminuir escala', hint: `${theme.scale}%`, shortcut: ['⌘', '-'], run: () => bumpScale(-SCALE_STEP) },
     { id: 'zoom-reset', group: 'Tema', icon: '=', label: 'Escala 100%', shortcut: ['⌘', '0'], run: () => bumpScale(0) },
     { id: 'settings', group: 'App', icon: '⚙', label: 'Configurações…', shortcut: ['⌘', ','], run: () => setSettings('aparencia') },
+    { id: 'views-cfg', group: 'Layout', icon: '▤', label: 'Configurar views da barra…', run: () => setSettings('views') },
   ]
 
   // Fontes assíncronas da paleta (carregam ao abrir; falha vira linha de erro na seção).
@@ -505,7 +592,9 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
   const rail = (
     <ErrorBoundary label="Bots">
     <BotsRail
-      bots={bots}
+      bots={spaceBots}
+      space={space}
+      hiddenCount={bots.length - spaceBots.length}
       selected={selected}
       onSelect={(n) => {
         selectBot(n)
@@ -556,8 +645,12 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
         dockOpen={narrow ? dockOverlay : prefs.dockOpen}
         focus={focus}
         view={view}
+        views={views}
         onView={setView}
+        onReorderViews={reorderViews}
         swarm={swarmBadge}
+        voiceOpen={voiceOpen}
+        onToggleVoice={() => setVoiceOpen((v) => !v)}
         onOpenPalette={() => setPalette(true)}
         onToggleRail={toggleRail}
         onToggleDock={toggleDock}
@@ -618,6 +711,8 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
                 {/* Área central: views empilhadas. Chat fica sempre montado (stream não cai);
                     as outras montam na 1ª visita e ficam vivas escondidas (useViewActive). */}
                 <div className="relative h-full w-full min-h-0 min-w-0 overflow-hidden bg-void">
+                  <div aria-hidden className="hc-aurora" />
+                  {spaceFlash > 0 && <div key={spaceFlash} aria-hidden className="hc-space-flash pointer-events-none absolute inset-0 z-[5]" />}
                   <ViewSlot id="chat" active={view === 'chat'} keepMounted>
                     <ErrorBoundary label="Chat">
                       <ChatPane rpc={rpc} bot={bot} connState={connState} />
@@ -717,12 +812,23 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
           onTheme={(t) => setTheme(t)}
           regions={regions}
           onRegions={setRegions}
-          onResetRegions={() => setRegionsState(resetRegions())}
+          onResetRegions={() => setRegionsState(resetRegions(space))}
           onResetSizes={resetSizes}
           onClose={() => setSettings(null)}
+          space={space}
+          viewOrder={prefs.viewOrder}
+          hiddenViews={prefs.hiddenViews}
+          onViews={(order, hidden) => {
+            const vis = order.filter((v) => !hidden.includes(v))
+            setPrefs((p) => ({ viewOrder: order, hiddenViews: hidden, ...(vis.includes(p.view) ? {} : { view: vis[0] ?? 'chat' }) }))
+          }}
+          onPreset={applyPreset}
         />
         </ErrorBoundary>
       )}
+      <ErrorBoundary label="Voz" compact>
+        <VoiceOverlay rpc={rpc} bot={selected} open={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      </ErrorBoundary>
       <ErrorBoundary label="Toasts" compact>
         <Toaster />
       </ErrorBoundary>

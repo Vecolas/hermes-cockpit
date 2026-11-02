@@ -2,8 +2,10 @@ import { GROUP_LABELS, GROUP_ORDER, botTitle, type BotProfile } from '../lib/bot
 import type { ReactNode } from 'react'
 import { Group, Panel, useDefaultLayout } from 'react-resizable-panels'
 import { safeStorage } from '../lib/layout'
+import { SPACES, type Space } from '../lib/space'
 import { ResizeHandle } from './layout/ResizeHandle'
 import { EmptyState } from './ui/EmptyState'
+import { Icon } from './ui/Icon'
 import { Skeleton } from './ui/Skeleton'
 import { cx } from './ui/cx'
 
@@ -16,13 +18,17 @@ interface Props {
   error?: string | null
   /** rodapé editável (região "rail" do registry) */
   footer?: ReactNode
+  /** espaço ativo (os bots já chegam filtrados) */
+  space?: Space
+  /** quantos bots ficaram fora por causa do espaço */
+  hiddenCount?: number
 }
 
 // Rail de bots como no wireframe: seções por grupo, item ativo com borda e
 // losango âmbar, "rodando" em verde, contador de sessões; rodapé com cota por
 // provedor (/quota do plugin). SWARM CODERS fica fora até existir fonte real
 // de subagents (P2-15) — sem chips inventados.
-export function BotsRail({ bots, selected, onSelect, loading, error, footer }: Props) {
+export function BotsRail({ bots, selected, onSelect, loading, error, footer, space = 'tudo', hiddenCount = 0 }: Props) {
   const layout = useDefaultLayout({ id: 'hc-rail', storage: safeStorage, onlySaveAfterUserInteractions: true })
   const byGroup = new Map<string, BotProfile[]>()
   for (const bot of bots) {
@@ -43,14 +49,22 @@ export function BotsRail({ bots, selected, onSelect, loading, error, footer }: P
       >
         <Panel id="rail-bots" minSize={120}>
           <div className="h-full overflow-y-auto px-3 pt-3 pb-2">
+            <div className="mb-3 flex items-center gap-2 px-1">
+              <Icon name="bot" size={12} className="text-space" />
+              <span className="label !text-dim">Bots</span>
+              <span className="label ml-auto !tracking-[0.12em]" title={SPACES.find((x) => x.id === space)?.hint}>
+                {SPACES.find((x) => x.id === space)?.label}
+                {hiddenCount > 0 && <span className="text-faint"> · +{hiddenCount} fora</span>}
+              </span>
+            </div>
             {loading && bots.length === 0 && <RailSkeleton />}
             {!loading && bots.length === 0 && (
               <EmptyState
                 compact
                 tone={error ? 'error' : 'neutral'}
-                icon={error ? '!' : '◇'}
-                title={error ? 'bots indisponíveis' : 'nenhum bot'}
-                detail={error ?? 'profiles.list não retornou profiles'}
+                icon={<Icon name={error ? 'alert' : 'bot'} size={14} />}
+                title={error ? 'bots indisponíveis' : hiddenCount > 0 ? 'nenhum bot neste espaço' : 'nenhum bot'}
+                detail={error ?? (hiddenCount > 0 ? `${hiddenCount} bot(s) em outros espaços — troque para Tudo (⌘⇧3)` : 'profiles.list não retornou profiles')}
               />
             )}
             {GROUP_ORDER.map((group) => {
@@ -126,7 +140,7 @@ function BotItem({
       )}
     >
       {active ? (
-        <span className="h-2 w-2 shrink-0 rotate-45 bg-amber shadow-[0_0_8px_var(--color-amber)] transition-transform duration-[var(--hc-dur-3)] group-hover:rotate-[135deg]" aria-hidden />
+        <span className="h-2 w-2 shrink-0 rotate-45 bg-space shadow-[0_0_8px_var(--color-space)] transition-transform duration-[var(--hc-dur-3)] group-hover:rotate-[135deg]" aria-hidden />
       ) : bot.rodando ? (
         <span className="hc-pulse-dot h-2 w-2 shrink-0 rounded-full bg-phos" aria-hidden />
       ) : (

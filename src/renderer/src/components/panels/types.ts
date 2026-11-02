@@ -6,13 +6,45 @@ export interface AgendaEvent {
   start?: string
   end?: string
   location?: string
+  description?: string
   htmlLink?: string
+  /** espaço da conta Google ('houer' = work; 'pessoal' = alexandre.slamaral@gmail.com) */
+  conta?: 'houer' | 'pessoal' | string
+  calendario?: 'Houer' | 'Pessoal' | 'FIAP' | string
 }
 
 export interface Agenda {
   events?: AgendaEvent[]
   date?: string
+  conta?: string
+  dias?: number
+  /** falhas parciais por "conta/calendário" (os demais calendários ainda vêm) */
+  erros?: Record<string, string>
   error?: string
+}
+
+/** Cor por calendário (timeline da agenda). */
+export const CALENDAR_COLORS: Record<string, string> = {
+  Houer: 'var(--color-amber)',
+  Pessoal: 'var(--color-cyanic)',
+  FIAP: 'var(--color-phos)',
+}
+export const calendarColor = (c?: string): string => CALENDAR_COLORS[c ?? ''] ?? 'var(--color-dim)'
+
+/** Job de /api/cron/jobs (hermes_cli/web_routers/cron.py, anotado com profile). */
+export interface CronJob {
+  id: string
+  name?: string | null
+  enabled?: boolean
+  state?: string | null
+  schedule_display?: string | null
+  schedule?: { display?: string; expr?: string; kind?: string }
+  next_run_at?: string | null
+  last_run_at?: string | null
+  last_error?: string | null
+  profile?: string
+  profile_name?: string
+  model?: string | null
 }
 
 export interface NotionTask {

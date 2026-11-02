@@ -1,8 +1,10 @@
+import { agendaPath, inSpace, spaceOfAccount, useSpace, type Space } from '../../lib/space'
 import { SkeletonLines } from '../ui/Skeleton'
 import { Bar, PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import {
   API,
+  calendarColor,
   maxPct,
   type Agenda,
   type AgendaEvent,
@@ -38,8 +40,20 @@ function hhmm(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** Rótulo das contas da agenda por espaço (para a linha de fonte). */
+export function agendaFonte(space: Space): string {
+  return space === 'houer' ? 'Google Calendar · Houer' : space === 'pessoal' ? 'Google · pessoal + FIAP' : 'Google · Houer + pessoal + FIAP'
+}
+
+/** Primeiro erro parcial de /agenda (ex.: token de uma conta expirado), mesmo com eventos das outras. */
+export function agendaPartialError(a: Agenda | null): string | null {
+  const e = a?.erros ? Object.entries(a.erros)[0] : null
+  return e ? `${e[0]}: ${e[1]}` : null
+}
+
 interface Block {
   key: string
+  color?: string
   label: string
   start: number
   end: number
@@ -55,12 +69,14 @@ function clampBlock(b: Block): Block | null {
 
 // ─── Hoje · time-boxing ──────────────────────────────────────────────────────
 export function TimeboxWidget({ refreshMs }: WidgetProps) {
-  const agenda = usePluginSource<Agenda>(API.agenda, refreshMs)
+  const space = useSpace()
+  const agenda = usePluginSource<Agenda>(agendaPath(space, 1), refreshMs)
   const foco = usePluginSource<Foco>(API.foco, refreshMs)
 
   const blocks: Block[] = []
   const allDay: AgendaEvent[] = []
-  for (const [i, ev] of (agenda.data?.events ?? []).entries()) {
+  const evs = (agenda.data?.events ?? []).filter((e) => inSpace(spaceOfAccount(e.conta), space))
+  for (const [i, ev] of evs.entries()) {
     const s = hourFrac(ev.start)
     const e = hourFrac(ev.end)
     if (s == null || e == null) {
@@ -73,7 +89,8 @@ export function TimeboxWidget({ refreshMs }: WidgetProps) {
       start: s,
       end: e,
       kind: 'evento',
-      title: `${hhmm(ev.start)}–${hhmm(ev.end)} ${ev.summary ?? ''}`,
+      color: calendarColor(ev.calendario),
+      title: `${hhmm(ev.start)}–${hhmm(ev.end)} ${ev.summary ?? ''}${ev.calendario ? ` · ${ev.calendario}` : ''}`,
     })
     if (b) blocks.push(b)
   }
@@ -110,14 +127,16 @@ export function TimeboxWidget({ refreshMs }: WidgetProps) {
   const nowH = now.getHours() + now.getMinutes() / 60
   const span = DAY_END - DAY_START
   const pos = (h: number) => `${((h - DAY_START) / span) * 100}%`
-  const err = agenda.error ?? foco.error ?? (foco.data?.erros ? Object.values(foco.data.erros)[0] : null) ?? null
+  const err =
+    agenda.error ?? agendaPartialError(agenda.data) ?? foco.error ?? (foco.data?.erros ? Object.values(foco.data.erros)[0] : null) ?? null
   const loading = agenda.loading && foco.loading
   const hours = Array.from({ length: span }, (_, i) => DAY_START + i)
 
   return (
     <PanelFrame
       titulo="Hoje · time-boxing"
-      fonte="agenda Houer + Notion TO-DO"
+      icon="clock"
+      fonte={`${agendaFonte(space)} + Notion`}
       error={err}
       loading={loading}
       onRefresh={() => {
@@ -143,9 +162,15 @@ export function TimeboxWidget({ refreshMs }: WidgetProps) {
                   ? 'border border-dashed border-edge2 text-faint'
                   : b.kind === 'tarefa'
                     ? 'border-l-2 border-amber bg-amber/15 text-ink'
-                    : 'bg-cyanic/15 text-ink'
+                    : 'border-l-2 text-ink'
               }`}
-              style={{ left: pos(b.start), width: `calc(${((b.end - b.start) / span) * 100}% - 2px)` }}
+              style={{
+                left: pos(b.start),
+                width: `calc(${((b.end - b.start) / span) * 100}% - 2px)`,
+                ...(b.kind === 'evento' && b.color
+                  ? { borderColor: b.color, background: `color-mix(in srgb, ${b.color} 16%, transparent)` }
+                  : {}),
+              }}
             >
               {b.label}
             </div>
@@ -222,15 +247,17 @@ export function TarefasWidget({ refreshMs }: WidgetProps) {
 
 // ─── Inbox triada ────────────────────────────────────────────────────────────
 export function InboxWidget({ refreshMs }: WidgetProps) {
+  const space = useSpace()
   const inbox = usePluginSource<Inbox>(API.inbox, refreshMs)
   const rows: Array<{ tag: 'responder' | 'ler'; m: InboxItem }> = [
     ...(inbox.data?.responder ?? []).map((m) => ({ tag: 'responder' as const, m })),
     ...(inbox.data?.ler ?? []).map((m) => ({ tag: 'ler' as const, m })),
-  ]
+  ].filter((r) => inSpace(spaceOfAccount(r.m.conta), space))
   return (
     <PanelFrame
       titulo="Inbox triada"
-      fonte="Gmail Houer · pessoal"
+      icon="inbox"
+      fonte={space === 'houer' ? 'Gmail Houer' : space === 'pessoal' ? 'Gmail pessoal' : 'Gmail Houer · pessoal'}
       error={inbox.error}
       loading={inbox.loading}
       empty={!inbox.loading && rows.length === 0}
@@ -250,7 +277,7 @@ export function InboxWidget({ refreshMs }: WidgetProps) {
             <span className="min-w-0 flex-1 truncate">
               <span className="text-dim">{m.from}</span> <span className="text-ink">{m.subject}</span>
             </span>
-            <span className="shrink-0 text-[9px] text-faint">{m.conta === 'work' ? 'Houer' : m.conta}</span>
+            <span className="shrink-0 text-[9px] text-faint">{m.conta === 'work' ? 'Houer' : m.conta === 'personal' ? 'pessoal' : m.conta}</span>
           </li>
         ))}
       </ul>
@@ -260,13 +287,15 @@ export function InboxWidget({ refreshMs }: WidgetProps) {
 
 // ─── Agenda (lista) ──────────────────────────────────────────────────────────
 export function AgendaWidget({ refreshMs }: WidgetProps) {
-  const agenda = usePluginSource<Agenda>(API.agenda, refreshMs)
-  const evs = agenda.data?.events ?? []
+  const space = useSpace()
+  const agenda = usePluginSource<Agenda>(agendaPath(space, 1), refreshMs)
+  const evs = (agenda.data?.events ?? []).filter((e) => inSpace(spaceOfAccount(e.conta), space))
   return (
     <PanelFrame
       titulo="Agenda de hoje"
-      fonte="Google Calendar · Houer"
-      error={agenda.error}
+      icon="calendar"
+      fonte={agendaFonte(space)}
+      error={agenda.error ?? agendaPartialError(agenda.data)}
       loading={agenda.loading}
       empty={!agenda.loading && evs.length === 0}
       emptyText={agenda.error ? 'sem dados da agenda' : 'agenda livre hoje'}
@@ -274,11 +303,19 @@ export function AgendaWidget({ refreshMs }: WidgetProps) {
     >
       <ul className="space-y-1">
         {evs.map((e, i) => (
-          <li key={i} className="flex gap-2 text-[11px]">
-            <span className="w-20 shrink-0 text-faint">
+          <li key={i} className="flex items-center gap-2 text-[11px]" title={[e.summary, e.location, e.calendario].filter(Boolean).join(' · ')}>
+            <span aria-hidden className="h-2.5 w-0.5 shrink-0 rounded-full" style={{ background: calendarColor(e.calendario) }} />
+            <span className="w-20 shrink-0 text-faint tabular-nums">
               {hourFrac(e.start) == null ? 'dia todo' : `${hhmm(e.start)}–${hhmm(e.end)}`}
             </span>
-            <span className="truncate text-ink">{e.summary}</span>
+            {e.htmlLink ? (
+              <a href={e.htmlLink} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-ink hover:text-space">
+                {e.summary}
+              </a>
+            ) : (
+              <span className="min-w-0 flex-1 truncate text-ink">{e.summary}</span>
+            )}
+            {e.calendario && <span className="shrink-0 text-[9px] text-faint">{e.calendario}</span>}
           </li>
         ))}
       </ul>

@@ -1,11 +1,12 @@
 import type { LayoutStorage } from 'react-resizable-panels'
+import { getSpace, spaceKey, type Space } from './space'
 
 // Layout do cockpit (P1-7/P1-9): estado de UI persistido (panes abertos, modo
 // foco, aba do dock) + constantes de tamanho dos split panes. Os tamanhos
 // arrastados pelo usuário são salvos pelo próprio react-resizable-panels
 // (useDefaultLayout) através de `safeStorage`.
 
-/** Views da área central (abas da topbar, ⌘1..⌘4). */
+/** Views da área central (abas da topbar; ⌘1..⌘6 seguem a ordem das VISÍVEIS). */
 export const VIEW_IDS = ['chat', 'swarm', 'automacoes', 'notion', 'ops', 'transcrever'] as const
 export type ViewId = (typeof VIEW_IDS)[number]
 export const isViewId = (v: unknown): v is ViewId => typeof v === 'string' && (VIEW_IDS as readonly string[]).includes(v)
@@ -19,6 +20,10 @@ export interface UiPrefs {
   dockCardsOpen: boolean
   focus: boolean
   dockTab: string
+  /** ordem das views na barra (arrastar/configurações); sempre contém todas */
+  viewOrder: ViewId[]
+  /** views escondidas da barra (continuam no ⌘K) */
+  hiddenViews: ViewId[]
 }
 
 export const DEFAULT_PREFS: UiPrefs = {
@@ -29,6 +34,21 @@ export const DEFAULT_PREFS: UiPrefs = {
   dockCardsOpen: true,
   focus: false,
   dockTab: 'terminal',
+  viewOrder: [...VIEW_IDS],
+  hiddenViews: [],
+}
+
+/** Normaliza uma ordem salva: remove inválidos/duplicados e acrescenta views novas no fim. */
+export function normalizeOrder(v: unknown): ViewId[] {
+  const list = Array.isArray(v) ? Array.from(new Set(v.filter(isViewId))) : []
+  for (const id of VIEW_IDS) if (!list.includes(id)) list.push(id)
+  return list
+}
+
+/** Views visíveis na barra, na ordem do usuário (nunca vazia: cai no Chat). */
+export function visibleViews(p: Pick<UiPrefs, 'viewOrder' | 'hiddenViews'>): ViewId[] {
+  const v = normalizeOrder(p.viewOrder).filter((id) => !p.hiddenViews.includes(id))
+  return v.length ? v : ['chat']
 }
 
 /** Abaixo disso: rail vira overlay, dock vira gaveta, strip rola na horizontal. */
@@ -54,9 +74,13 @@ export const GROUP_IDS = {
 
 const PREFS_KEY = 'hermes-cockpit.ui.v1'
 
-export function loadPrefs(): UiPrefs {
+/**
+ * Prefs de UI POR ESPAÇO (`hermes-cockpit.ui.v1:<espaço>`). Primeira visita a
+ * um espaço herda o legado sem sufixo (instalações anteriores à v3).
+ */
+export function loadPrefs(space: Space = getSpace()): UiPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_KEY)
+    const raw = localStorage.getItem(spaceKey(PREFS_KEY, space)) ?? localStorage.getItem(PREFS_KEY)
     if (!raw) return DEFAULT_PREFS
     const p = JSON.parse(raw) as Partial<UiPrefs>
     const b = (v: unknown, fb: boolean) => (typeof v === 'boolean' ? v : fb)
@@ -68,15 +92,17 @@ export function loadPrefs(): UiPrefs {
       dockCardsOpen: b(p.dockCardsOpen, true),
       focus: b(p.focus, false),
       dockTab: typeof p.dockTab === 'string' ? p.dockTab : DEFAULT_PREFS.dockTab,
+      viewOrder: normalizeOrder(p.viewOrder),
+      hiddenViews: Array.isArray(p.hiddenViews) ? Array.from(new Set(p.hiddenViews.filter(isViewId))) : [],
     }
   } catch {
     return DEFAULT_PREFS
   }
 }
 
-export function savePrefs(p: UiPrefs): void {
+export function savePrefs(p: UiPrefs, space: Space = getSpace()): void {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(p))
+    localStorage.setItem(spaceKey(PREFS_KEY, space), JSON.stringify(p))
   } catch {
     /* sem storage */
   }

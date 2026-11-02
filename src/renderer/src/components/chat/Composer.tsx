@@ -161,7 +161,7 @@ export function Composer({
 
   return (
     <div className="border-t border-edge px-5 py-3">
-      <div className="relative rounded-lg border border-edge bg-panel px-3.5 pb-2 pt-2 focus-within:border-amber/50">
+      <div className="relative mx-auto max-w-[880px] rounded-xl border border-edge bg-panel px-3.5 pb-2 pt-2 shadow-[var(--hc-shadow-1)] transition-[border-color,box-shadow] duration-150 focus-within:border-amber/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-amber)_10%,transparent)]">
         {showSuggest && (
           <ul className="absolute bottom-full left-0 right-0 mb-1 max-h-72 overflow-y-auto rounded-md border border-edge2 bg-panel2 py-1 shadow-xl">
             {suggestions.map((c, i) => (
@@ -253,6 +253,14 @@ export function Composer({
                 <MicGlyph />
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('hc:voice', { detail: { open: true } }))}
+              title="modo voz — conversa falada com o bot (⌘⇧V)"
+              className="flex h-[22px] w-[26px] items-center justify-center rounded border border-edge text-dim transition-colors hover:border-cyanic/60 hover:text-cyanic"
+            >
+              <WaveGlyph />
+            </button>
             {running ? (
               <button
                 onClick={onCancel}
@@ -273,7 +281,7 @@ export function Composer({
           </div>
         </div>
       </div>
-      {footerLeft && <div className="mt-1.5 px-1 text-[10.5px] text-faint">{footerLeft}</div>}
+      {footerLeft && <div className="mx-auto mt-1.5 max-w-[880px] px-1 font-mono text-[10px] tracking-wide text-faint">{footerLeft}</div>}
     </div>
   )
 }
@@ -283,6 +291,14 @@ function MicGlyph() {
     <svg width="11" height="13" viewBox="0 0 11 13" fill="none" aria-hidden>
       <rect x="3" y="0.75" width="5" height="7.5" rx="2.5" stroke="currentColor" strokeWidth="1.3" />
       <path d="M1 6.25a4.5 4.5 0 0 0 9 0M5.5 10.75v1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function WaveGlyph() {
+  return (
+    <svg width="13" height="11" viewBox="0 0 13 11" fill="none" aria-hidden>
+      <path d="M1 4.5v2M3.75 2.5v6M6.5 0.75v9.5M9.25 2.5v6M12 4.5v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   )
 }

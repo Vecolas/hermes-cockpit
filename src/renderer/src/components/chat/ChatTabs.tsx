@@ -51,7 +51,7 @@ export function ChatTabs({
   canReopen,
   onPopout,
 }: Props) {
-  const [menu, setMenu] = useState<{ key: string | null; x: number; y: number } | null>(null)
+  const [menu, setMenu] = useState<{ key: string | null; x: number; y: number; list?: boolean } | null>(null)
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
@@ -65,7 +65,7 @@ export function ChatTabs({
     }
   }, [menu])
   const sides = tabs.filter((t) => t.kind === 'side').map((t) => t.key)
-  const menuItems = (key: string | null): Array<{ label: string; run: () => void; off?: boolean }> => {
+  const menuItems = (key: string | null): Array<{ label: string; run: () => void; off?: boolean; tab?: ChatTab }> => {
     const idx = key ? tabs.findIndex((t) => t.key === key) : -1
     const isSide = key ? key !== tabs[0]?.key && tabs[idx]?.kind === 'side' : false
     return [
@@ -80,12 +80,35 @@ export function ChatTabs({
           ]
         : []),
       ...(onReopen ? [{ label: 'Reabrir fechada  ⌘⇧T', run: onReopen, off: !canReopen }] : []),
+      // lista de abas (overflow): só no menu do botão ⋯
+      ...(menu?.list ? tabs.map((t) => ({ label: t.kind === 'side' ? t.title : 'Bot Chat', run: () => onSelect(t.key), tab: t, off: disabled })) : []),
     ]
   }
   const [editing, setEditing] = useState<string | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [overKey, setOverKey] = useState<string | null>(null)
   const strip = useRef<HTMLDivElement>(null)
+
+  // overflow: setas laterais + fade nas bordas quando a faixa não cabe
+  const [edges, setEdges] = useState({ left: false, right: false })
+  useEffect(() => {
+    const el = strip.current
+    if (!el) return
+    const measure = () => {
+      const left = el.scrollLeft > 2
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+      setEdges((p) => (p.left === left && p.right === right ? p : { left, right }))
+    }
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', measure)
+      ro?.disconnect()
+    }
+  }, [tabs.length])
+  const nudge = (dir: -1 | 1) => strip.current?.scrollBy({ left: dir * Math.max(160, (strip.current.clientWidth ?? 300) * 0.6), behavior: 'smooth' })
 
   // aba ativa sempre visível na faixa
   useEffect(() => {
@@ -102,7 +125,17 @@ export function ChatTabs({
   }
 
   return (
-    <div className="flex min-w-0 items-stretch border-b border-edge bg-panel/40">
+    <div className="relative flex min-w-0 items-stretch border-b border-edge bg-panel/40">
+      {edges.left && (
+        <button
+          type="button"
+          onClick={() => nudge(-1)}
+          aria-label="rolar abas para a esquerda"
+          className="hc-fade-in shrink-0 border-r border-edge px-1.5 text-[11px] text-faint hover:bg-panel2 hover:text-ink"
+        >
+          ‹
+        </button>
+      )}
       <div
         ref={strip}
         role="tablist"
@@ -123,6 +156,13 @@ export function ChatTabs({
           e.preventDefault()
           if (editing !== next.key) onSelect(next.key)
           strip.current?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(next.key)}"]`)?.focus()
+        }}
+        onWheel={(e) => {
+          // roda vertical do mouse rola a faixa na horizontal
+          if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+        }}
+        style={{
+          maskImage: edges.left || edges.right ? `linear-gradient(to right, ${edges.left ? 'transparent 0, #000 24px' : '#000 0'}, ${edges.right ? '#000 calc(100% - 24px), transparent 100%' : '#000 100%'})` : undefined,
         }}
         className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
@@ -217,6 +257,16 @@ export function ChatTabs({
           )
         })}
       </div>
+      {edges.right && (
+        <button
+          type="button"
+          onClick={() => nudge(1)}
+          aria-label="rolar abas para a direita"
+          className="hc-fade-in shrink-0 border-l border-edge px-1.5 text-[11px] text-faint hover:bg-panel2 hover:text-ink"
+        >
+          ›
+        </button>
+      )}
       <button
         onClick={onNew}
         disabled={disabled}
@@ -229,34 +279,47 @@ export function ChatTabs({
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-          setMenu(menu ? null : { key: activeKey, x: r.right - 200, y: r.bottom + 2 })
+          setMenu(menu ? null : { key: activeKey, x: r.right - 220, y: r.bottom + 2, list: true })
         }}
-        title="gerenciar abas"
+        title={`gerenciar abas · ${tabs.length} aberta(s)`}
         className="shrink-0 border-l border-edge px-2 text-[13px] text-faint hover:bg-panel2 hover:text-ink"
       >
-        ⋯
+        ⋯{tabs.length > 1 && <span className="ml-0.5 align-top font-mono text-[9px] text-faint">{tabs.length}</span>}
       </button>
       {menu && (
         <div
           role="menu"
           onMouseDown={(e) => e.stopPropagation()}
           style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 210)), top: menu.y }}
-          className="hc-glass hc-rise fixed z-50 w-[200px] rounded-md border border-edge2 py-1 shadow-xl"
+          className="hc-glass hc-rise fixed z-50 max-h-[70vh] w-[220px] overflow-y-auto rounded-md border border-edge2 py-1 shadow-xl"
         >
-          {menuItems(menu.key).map((it) => (
-            <button
-              key={it.label}
-              role="menuitem"
-              disabled={it.off}
-              onClick={() => {
-                setMenu(null)
-                it.run()
-              }}
-              className="block w-full px-3 py-1 text-left text-[11.5px] text-dim hover:bg-panel2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
-            >
-              {it.label}
-            </button>
-          ))}
+          {menuItems(menu.key).map((it, i, all) => {
+            const firstTab = it.tab && !all[i - 1]?.tab
+            const active = it.tab?.key === activeKey
+            return (
+              <div key={it.tab ? `tab-${it.tab.key}` : `act-${it.label}`}>
+                {firstTab && <div className="label mx-3 mb-0.5 mt-1.5 border-t border-edge pt-1.5 text-[9px]">abas abertas</div>}
+                <button
+                  role="menuitem"
+                  disabled={it.off}
+                  onClick={() => {
+                    setMenu(null)
+                    it.run()
+                  }}
+                  className={`flex w-full min-w-0 items-center gap-1.5 px-3 py-1 text-left text-[11.5px] hover:bg-panel2 hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent ${
+                    active ? 'text-amber' : 'text-dim'
+                  }`}
+                >
+                  {it.tab && (
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${streaming.has(it.tab.key) ? 'hc-pulse-dot bg-amber' : active ? 'bg-amber' : 'bg-edge2'}`}
+                    />
+                  )}
+                  <span className="min-w-0 truncate">{it.label}</span>
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

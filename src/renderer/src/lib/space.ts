@@ -85,3 +85,26 @@ export function spaceOfAccount(conta: string | null | undefined): ItemSpace {
   if (c === 'pessoal' || c === 'personal') return 'pessoal'
   return 'shared'
 }
+
+// ─── adições do shell (compatíveis) ─────────────────────────────────────────
+
+/** Ordem do seletor da topbar (⌘⇧1 Pessoal · ⌘⇧2 Houer · ⌘⇧3 Tudo). */
+export const SPACE_ORDER: Space[] = ['pessoal', 'houer', 'tudo']
+
+export const isSpace = (v: unknown): v is Space => v === 'tudo' || v === 'houer' || v === 'pessoal'
+
+/** Chave de localStorage escopada por espaço (layout/prefs salvos POR ESPAÇO). */
+export function spaceKey(base: string, space: Space = current): string {
+  return `${base}:${space}`
+}
+
+/** Valor de `?conta=` das rotas /agenda e /inbox do plugin para um espaço. */
+export function contaOfSpace(space: Space = current): 'work' | 'personal' | 'all' {
+  return space === 'houer' ? 'work' : space === 'pessoal' ? 'personal' : 'all'
+}
+
+/** Rota da agenda do plugin para o espaço (Houer, pessoal alexandre.slamaral@gmail.com + FIAP, ou todas). */
+export function agendaPath(space: Space = current, dias = 1): string {
+  const d = Math.max(1, Math.min(14, Math.round(dias)))
+  return `/api/plugins/cockpit/agenda?conta=${contaOfSpace(space)}&dias=${d}`
+}

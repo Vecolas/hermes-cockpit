@@ -3,7 +3,8 @@
 // componentes: SwarmView, SwarmCard, SwarmDockTab). Falha do main vira estado
 // 'unavailable'/'error' — nunca dado inventado.
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { inSpace, spaceOfBot, spaceOfPath, useSpace, type ItemSpace } from './space'
 import { hasMain, invoke, onMain } from './ipc'
 import { toast } from './toast'
 
@@ -328,7 +329,17 @@ export function useSwarm(): SwarmState & { refresh: () => Promise<void> } {
     }
   }, [])
   const s = useSyncExternalStore(subscribe, () => state)
-  return { ...s, refresh: refreshSwarm }
+  // Espaço ativo: runs filtradas (bot que pediu, senão repo). Aprovações e
+  // perguntas pendentes NÃO são filtradas — nada que espera você fica escondido.
+  const space = useSpace()
+  const runs = useMemo(() => (space === 'tudo' ? s.runs : s.runs.filter((r) => inSpace(runSpace(r), space))), [s.runs, space])
+  return { ...s, runs, refresh: refreshSwarm }
+}
+
+/** espaço de uma run: bot que pediu (se não for compartilhado), senão o caminho do repo */
+export function runSpace(r: RunMeta): ItemSpace {
+  const bySpace = r.requestedBy?.profile ? spaceOfBot(r.requestedBy.profile) : 'shared'
+  return bySpace !== 'shared' ? bySpace : spaceOfPath(r.repo)
 }
 
 /** Assina `swarm:changed` (já com o domínio ativo via useSwarm). */

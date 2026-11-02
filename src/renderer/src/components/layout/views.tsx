@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import type { ViewId } from '../../lib/layout'
+import type { IconName } from '../ui/Icon'
 
 // Views da área central (Chat · Swarm · Ops · Transcrever). O shell mantém
 // cada view montada depois da primeira visita (keep-alive: stream do chat,
@@ -12,20 +13,25 @@ import type { ViewId } from '../../lib/layout'
 export interface ViewDef {
   id: ViewId
   label: string
-  icon: string
-  /** atalho exibido (⌘1..⌘4) */
+  /** ícone SVG (components/ui/Icon) */
+  icon: IconName
+  /** glifo de texto para listas só-texto (paleta ⌘K) */
+  glyph: string
+  /** atalho padrão; o real (⌘1..⌘6) segue a ordem das views VISÍVEIS (lib/layout visibleViews) */
   key: string
   hint: string
 }
 
 export const VIEWS: ViewDef[] = [
-  { id: 'chat', label: 'Chat', icon: '◆', key: '1', hint: 'chat do bot selecionado' },
-  { id: 'swarm', label: 'Swarm', icon: '⋮⋮', key: '2', hint: 'runs de Claude Code e subagents' },
-  { id: 'automacoes', label: 'Automações', icon: '⟳', key: '3', hint: 'crons, blueprints, kanban e workflows salvos' },
-  { id: 'notion', label: 'Notion', icon: 'N', key: '4', hint: 'tarefas, busca e páginas do Notion' },
-  { id: 'ops', label: 'Ops', icon: '⌁', key: '5', hint: 'modelos, portas, processos, repos, containers' },
-  { id: 'transcrever', label: 'Transcrever', icon: '◉', key: '6', hint: 'transcriber local: arquivo, YouTube, tempo real' },
+  { id: 'chat', label: 'Chat', icon: 'chat', glyph: '◆', key: '1', hint: 'chat do bot selecionado' },
+  { id: 'swarm', label: 'Swarm', icon: 'swarm', glyph: '⋮⋮', key: '2', hint: 'runs de Claude Code e subagents' },
+  { id: 'automacoes', label: 'Automações', icon: 'automations', glyph: '⟳', key: '3', hint: 'crons, blueprints, kanban e workflows salvos' },
+  { id: 'notion', label: 'Notion', icon: 'notion', glyph: 'N', key: '4', hint: 'tarefas, busca e páginas do Notion' },
+  { id: 'ops', label: 'Ops', icon: 'ops', glyph: '⌁', key: '5', hint: 'modelos, portas, processos, repos, containers' },
+  { id: 'transcrever', label: 'Transcrever', icon: 'transcribe', glyph: '◉', key: '6', hint: 'transcriber local: arquivo, YouTube, tempo real' },
 ]
+
+export const VIEW_BY_ID = Object.fromEntries(VIEWS.map((v) => [v.id, v])) as Record<ViewId, ViewDef>
 
 const ActiveCtx = createContext(true)
 

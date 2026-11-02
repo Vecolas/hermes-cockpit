@@ -14,6 +14,10 @@
   --color-phos: #7ee787;
   --color-cyanic: #6cb6ff;
   --color-alert: #e5534b;
+  /* acento do ESPAÇO ativo (lib/space.ts → <html data-space>): Houer = âmbar,
+     Pessoal = ciano/fósforo, Tudo = neutro. Utilitárias: text-space, bg-space… */
+  --color-space: #e8a33d;
+  --color-space2: #e8a33d;
   --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
   --font-display: "Iowan Old Style", "New York", ui-serif, Georgia, serif;
 }
@@ -36,7 +40,44 @@
     0 2px 6px rgb(0 0 0 / 0.3);
   --hc-shadow-3: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 64px -16px rgb(0 0 0 / 0.7),
     0 6px 18px rgb(0 0 0 / 0.35);
-  --hc-ring: color-mix(in srgb, var(--color-amber) 70%, transparent);
+  --hc-dur-5: 640ms; /* aurora/gauges/entradas longas */
+  --hc-ease-emph: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --hc-stagger-step: 32ms; /* atraso entre filhos de hc-stagger */
+  --hc-lift: -1.5px; /* deslocamento do hover lift */
+  --hc-ring: color-mix(in srgb, var(--color-space) 75%, transparent);
+}
+
+/* ─── Espaço ativo (Pessoal | Houer | Tudo) ─────────────────────────────────
+   --color-space é registrada (@property) para a troca de espaço animar a cor
+   em toda a UI (indicadores, foco, aurora) em vez de piscar. */
+@property --color-space {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e8a33d;
+}
+@property --color-space2 {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #e8a33d;
+}
+:root {
+  --color-space: var(--color-amber);
+  --color-space2: color-mix(in srgb, var(--color-amber) 60%, var(--color-alert));
+  transition:
+    --color-space var(--hc-dur-5) var(--hc-ease-std),
+    --color-space2 var(--hc-dur-5) var(--hc-ease-std);
+}
+:root[data-space="houer"] {
+  --color-space: var(--color-amber);
+  --color-space2: color-mix(in srgb, var(--color-amber) 60%, var(--color-alert));
+}
+:root[data-space="pessoal"] {
+  --color-space: var(--color-cyanic);
+  --color-space2: var(--color-phos);
+}
+:root[data-space="tudo"] {
+  --color-space: color-mix(in srgb, var(--color-ink) 82%, var(--color-dim));
+  --color-space2: var(--color-dim);
 }
 
 html,
@@ -157,7 +198,12 @@ body::before {
     padding-inline: 0.45rem;
   }
 }
-@media (max-width: 900px) {
+@media (max-width: 1400px) {
+  .hc-space-label {
+    display: none;
+  }
+}
+@media (max-width: 1180px) {
   .hc-tab-label {
     display: none;
   }
@@ -387,7 +433,8 @@ body::before {
 @keyframes hc-kf-view {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px) scale(0.997);
+    filter: blur(2px);
   }
   to {
     opacity: 1;
@@ -464,6 +511,13 @@ body::before {
   outline: 1.5px solid var(--hc-ring);
   outline-offset: 1.5px;
   border-radius: 6px;
+  animation: hc-kf-ring var(--hc-dur-3) var(--hc-ease-out);
+}
+@keyframes hc-kf-ring {
+  from {
+    outline-offset: 5px;
+    outline-color: transparent;
+  }
 }
 :where(input, textarea, select):focus-visible {
   outline: none;
@@ -501,8 +555,8 @@ body::before {
   bottom: -3px;
   height: 1.5px;
   border-radius: 2px;
-  background: var(--color-amber);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-amber) 70%, transparent);
+  background: var(--color-space);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-space) 70%, transparent);
 }
 
 /* item da rail: barra de acento à esquerda que cresce no ativo */
@@ -517,13 +571,13 @@ body::before {
   width: 2px;
   height: 0;
   border-radius: 2px;
-  background: var(--color-amber);
+  background: var(--color-space);
   transform: translateY(-50%);
   transition: height var(--hc-dur-3) var(--hc-ease-out);
 }
 .hc-rail-item[data-active]::after {
   height: 60%;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--color-amber) 70%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-space) 70%, transparent);
 }
 
 /* ─── Scrollbars finas ────────────────────────────────────────────────── */
@@ -587,4 +641,210 @@ body::before {
 }
 @media (prefers-reduced-motion: reduce) {
   .hc-flow-x, .hc-flow-y { animation: none; }
+}
+
+/* ─── Utilitárias "frontier" (CONTRATO com os demais agentes) ──────────────
+   Nomes fixos: hc-card, hc-card-hover, hc-aurora, hc-scan, hc-count,
+   hc-stagger, hc-glow-phos, hc-glow-cyan. Extras livres: hc-lift, hc-float,
+   hc-draw, hc-space-ring. Todas desligam com prefers-reduced-motion. */
+
+/* superfície padrão: borda + gradiente sutil + profundidade */
+@utility hc-card {
+  position: relative;
+  border: 1px solid var(--color-edge);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 2.5%, transparent), transparent 40%),
+    linear-gradient(180deg, var(--color-panel2), var(--color-panel));
+  box-shadow: var(--hc-shadow-1);
+}
+/* hover lift + borda acende na cor do espaço (combine com hc-card) */
+@utility hc-card-hover {
+  transition:
+    transform var(--hc-dur-2) var(--hc-ease-out),
+    border-color var(--hc-dur-2) ease,
+    box-shadow var(--hc-dur-3) var(--hc-ease-out);
+  &:hover {
+    transform: translateY(var(--hc-lift));
+    border-color: color-mix(in srgb, var(--color-space) 35%, var(--color-edge2));
+    box-shadow:
+      var(--hc-shadow-2),
+      0 0 0 1px color-mix(in srgb, var(--color-space) 10%, transparent);
+  }
+  &:active {
+    transform: translateY(0) scale(0.995);
+  }
+}
+/* só o hover lift (botões/itens) */
+@utility hc-lift {
+  transition: transform var(--hc-dur-2) var(--hc-ease-out), box-shadow var(--hc-dur-2) ease;
+  &:hover:not(:disabled) {
+    transform: translateY(var(--hc-lift));
+  }
+}
+/* fundo animado muito sutil (área central). Use num elemento absoluto atrás do conteúdo. */
+@utility hc-aurora {
+  position: absolute;
+  inset: -20%;
+  pointer-events: none;
+  opacity: 0.55;
+  background:
+    radial-gradient(38% 30% at 22% 18%, color-mix(in srgb, var(--color-space) 7%, transparent), transparent 70%),
+    radial-gradient(34% 34% at 82% 72%, color-mix(in srgb, var(--color-space2) 5%, transparent), transparent 70%),
+    radial-gradient(30% 26% at 60% 10%, color-mix(in srgb, var(--color-cyanic) 3%, transparent), transparent 70%);
+  filter: blur(18px);
+  animation: hc-kf-aurora 38s var(--hc-ease-std) infinite alternate;
+}
+/* varredura luminosa (carregando/“ao vivo”). Elemento precisa de position. */
+@utility hc-scan {
+  position: relative;
+  overflow: hidden;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      100deg,
+      transparent 30%,
+      color-mix(in srgb, var(--color-space) 14%, transparent) 50%,
+      transparent 70%
+    );
+    transform: translateX(-100%);
+    animation: hc-kf-scan 2.6s var(--hc-ease-std) infinite;
+  }
+}
+/* número que anima (CountUp em ui/Viz): tabular + leve pop ao montar */
+@utility hc-count {
+  font-variant-numeric: tabular-nums;
+  display: inline-block;
+  animation: hc-kf-count var(--hc-dur-3) var(--hc-ease-spring) backwards;
+}
+/* filhos entram em cascata (até 16; o resto entra junto com o 16º) */
+@utility hc-stagger {
+  & > * {
+    animation: hc-kf-rise var(--hc-dur-3) var(--hc-ease-out) backwards;
+  }
+  & > *:nth-child(2) { animation-delay: calc(var(--hc-stagger-step) * 1); }
+  & > *:nth-child(3) { animation-delay: calc(var(--hc-stagger-step) * 2); }
+  & > *:nth-child(4) { animation-delay: calc(var(--hc-stagger-step) * 3); }
+  & > *:nth-child(5) { animation-delay: calc(var(--hc-stagger-step) * 4); }
+  & > *:nth-child(6) { animation-delay: calc(var(--hc-stagger-step) * 5); }
+  & > *:nth-child(7) { animation-delay: calc(var(--hc-stagger-step) * 6); }
+  & > *:nth-child(8) { animation-delay: calc(var(--hc-stagger-step) * 7); }
+  & > *:nth-child(9) { animation-delay: calc(var(--hc-stagger-step) * 8); }
+  & > *:nth-child(10) { animation-delay: calc(var(--hc-stagger-step) * 9); }
+  & > *:nth-child(11) { animation-delay: calc(var(--hc-stagger-step) * 10); }
+  & > *:nth-child(12) { animation-delay: calc(var(--hc-stagger-step) * 11); }
+  & > *:nth-child(13) { animation-delay: calc(var(--hc-stagger-step) * 12); }
+  & > *:nth-child(14) { animation-delay: calc(var(--hc-stagger-step) * 13); }
+  & > *:nth-child(15) { animation-delay: calc(var(--hc-stagger-step) * 14); }
+  & > *:nth-child(n + 16) { animation-delay: calc(var(--hc-stagger-step) * 15); }
+}
+@utility hc-glow-phos {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-phos) 45%, transparent),
+    0 0 14px -2px color-mix(in srgb, var(--color-phos) 45%, transparent);
+}
+@utility hc-glow-cyan {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-cyanic) 45%, transparent),
+    0 0 14px -2px color-mix(in srgb, var(--color-cyanic) 45%, transparent);
+}
+/* glow na cor do espaço ativo */
+@utility hc-glow-space {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-space) 45%, transparent),
+    0 0 14px -2px color-mix(in srgb, var(--color-space) 45%, transparent);
+}
+/* flutuação lenta (ilustrações) */
+@utility hc-float {
+  animation: hc-kf-float 3.2s var(--hc-ease-std) infinite alternate;
+}
+/* traço SVG que se desenha (sparklines) */
+@utility hc-draw {
+  stroke-dasharray: 600;
+  stroke-dashoffset: 0;
+  animation: hc-kf-draw var(--hc-dur-5) var(--hc-ease-out) backwards;
+}
+
+@keyframes hc-kf-aurora {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(3%, -2%, 0) rotate(4deg); }
+  100% { transform: translate3d(-3%, 2%, 0) rotate(-3deg); }
+}
+@keyframes hc-kf-scan {
+  60%, 100% { transform: translateX(100%); }
+}
+@keyframes hc-kf-count {
+  from { opacity: 0.2; transform: translateY(3px); }
+}
+@keyframes hc-kf-float {
+  to { transform: translateY(-3px); }
+}
+@keyframes hc-kf-draw {
+  from { stroke-dashoffset: 600; }
+}
+
+/* ─── Seletor de espaço (topbar) ─────────────────────────────────────────── */
+.hc-space-switch {
+  position: relative;
+}
+.hc-space-ind {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-space) 14%, var(--color-panel2));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-space) 45%, transparent),
+    0 0 16px -6px var(--color-space);
+  transition:
+    transform var(--hc-dur-3) var(--hc-ease-spring),
+    width var(--hc-dur-3) var(--hc-ease-out),
+    background-color var(--hc-dur-5) ease;
+  pointer-events: none;
+}
+/* flash curto na área central ao trocar de espaço */
+.hc-space-flash {
+  animation: hc-kf-space-flash var(--hc-dur-5) var(--hc-ease-out);
+}
+@keyframes hc-kf-space-flash {
+  0% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-space) 40%, transparent), inset 0 0 60px -20px var(--color-space); }
+  100% { box-shadow: inset 0 0 0 1px transparent; }
+}
+
+/* aba de view sendo arrastada / alvo do drop */
+.hc-viewtab[data-dragging] {
+  opacity: 0.4;
+}
+.hc-viewtab[data-drop="before"]::before,
+.hc-viewtab[data-drop="after"]::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-space);
+  box-shadow: 0 0 8px var(--color-space);
+}
+.hc-viewtab[data-drop="before"]::before { left: -2px; }
+.hc-viewtab[data-drop="after"]::after { right: -2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-aurora,
+  .hc-scan::after,
+  .hc-float,
+  .hc-draw,
+  .hc-space-flash {
+    animation: none !important;
+  }
+  .hc-scan::after {
+    display: none;
+  }
+  :root {
+    transition: none;
+  }
 }

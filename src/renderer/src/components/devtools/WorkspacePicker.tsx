@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { inSpace, spaceOfPath, useSpace } from '../../lib/space'
 import {
   basename,
   fetchRepos,
@@ -42,7 +43,8 @@ export function WorkspacePicker() {
   }
 
   const label = ws.path ? basename(ws.path) : ws.loading ? 'carregando…' : 'sem workspace'
-  const list = repos.data ?? []
+  const space = useSpace()
+  const list = (repos.data ?? []).filter((r) => inSpace(spaceOfPath(r.path), space))
 
   return (
     <div ref={box} className="relative min-w-0 flex-1">

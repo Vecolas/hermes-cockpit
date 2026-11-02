@@ -160,6 +160,12 @@ export function SessionDrawer(props: Props) {
         setResults(
           res
             .filter((r) => (r.title ?? '').trim() !== BOT_CHAT_TITLE)
+            // busca é do bot aberto (sempre do espaço — o ChatPane avisa quando não é):
+            // descarta linhas de outro profile caso o backend ignore o filtro
+            .filter((r) => {
+              const p = (r as { profile?: unknown }).profile
+              return typeof p !== 'string' || !p || p === profile
+            })
             .map((r) => ({
               id: r.id,
               title: rowTitle(r),

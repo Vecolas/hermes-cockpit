@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { STATUS_LABEL, fmtDuration, isActive, runElapsedMs, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
+import { STATUS_LABEL, errMsg, fmtCost, fmtDuration, isActive, runElapsedMs, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
+import { invoke } from '../../lib/ipc'
+import { toast } from '../../lib/toast'
+import { requestTerminal } from '../devtools/TerminalTab'
 import type { ChatItem } from '../../lib/chat-store'
 import { CodeBlock, Markdown } from './Markdown'
 
@@ -65,10 +68,10 @@ export function Transcript({ items, verbose, running, status, botName, baseline 
           if (bottom !== atBottom) setAtBottom(bottom)
           if (bottom) setUnseen(0)
         }}
-        className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+        className="min-h-0 flex-1 overflow-y-auto px-5 py-5"
       >
         {items.length === 0 && !running && !footer && empty}
-        <div className="flex flex-col gap-3">
+        <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3.5">
           {groups.map((g, gi) => {
             const first = g.kind === 'tools' ? g.tools[0] : g.item
             const prev = gi > 0 ? lastOf(groups[gi - 1]) : null
@@ -82,17 +85,17 @@ export function Transcript({ items, verbose, running, status, botName, baseline 
               )
             return sep ? [sep, node] : node
           })}
-          {running && <TurnIndicator status={status} />}
+          {running && <TurnIndicator status={status} monogram={monogram} />}
           {footer}
         </div>
       </div>
       {!atBottom && (
         <button
           onClick={toBottom}
-          className="hc-glass hc-fade-in absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-edge2 px-3 py-1 text-[11px] text-ink shadow-lg hover:border-amber/60"
+          className="hc-glass hc-rise absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-edge2 px-3 py-1 text-[11px] text-ink shadow-lg transition-[border-color,transform] duration-150 hover:-translate-y-px hover:border-amber/60"
         >
-          <span className="text-amber">↓</span>
-          voltar ao fim
+          <BounceArrow active={unseen > 0 || running} />
+          <span className="label tracking-[0.12em] text-ink/90">voltar ao fim</span>
           {unseen > 0 && <span className="rounded-full bg-amber px-1.5 text-[10px] font-semibold text-void">{unseen}</span>}
         </button>
       )}
@@ -154,10 +157,12 @@ function fullTime(ts?: number): string | undefined {
 
 function DaySep({ ts }: { ts: number }) {
   return (
-    <div className="flex items-center gap-3 py-1" role="separator">
-      <span className="h-px flex-1 bg-edge" />
-      <span className="label text-[9.5px]">{dayLabel(ts)}</span>
-      <span className="h-px flex-1 bg-edge" />
+    <div className="sticky top-0 z-[5] -mx-1 flex items-center gap-3 py-1.5" role="separator">
+      <span className="h-px flex-1 bg-gradient-to-r from-transparent to-edge2" />
+      <span className="hc-glass rounded-full border border-edge px-2.5 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.16em] text-dim">
+        {dayLabel(ts)}
+      </span>
+      <span className="h-px flex-1 bg-gradient-to-l from-transparent to-edge2" />
     </div>
   )
 }
@@ -197,7 +202,7 @@ function Row({
       return (
         <div className={`group flex justify-end gap-2 ${anim}`}>
           <Stamp ts={item.ts} side="left" />
-          <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-lg rounded-br-sm border border-edge2 bg-panel2 px-3.5 py-2 text-ink">
+          <div className="max-w-[min(78%,62ch)] whitespace-pre-wrap break-words rounded-xl rounded-br-sm border border-edge2 bg-panel2 px-3.5 py-2 text-[13.5px] leading-[1.6] text-ink shadow-[var(--hc-shadow-1)]">
             {item.text}
           </div>
         </div>
@@ -213,17 +218,12 @@ function Row({
           >
             {monogram}
           </div>
-          <div className="min-w-0 max-w-[92%] flex-1">
-            {verbose && item.reasoning && (
-              <details className="mb-1.5 text-[11.5px] text-faint" open={item.streaming && !item.text}>
-                <summary className="label cursor-pointer select-none">raciocínio</summary>
-                <div className="mt-1 whitespace-pre-wrap border-l border-edge2 pl-3 text-faint">{item.reasoning}</div>
-              </details>
-            )}
+          <div className="min-w-0 max-w-[72ch] flex-1">
+            {item.reasoning && <Reasoning text={item.reasoning} live={item.streaming && !item.text} verbose={verbose} />}
             {(item.text || item.streaming) && (
-              <div className="break-words leading-relaxed text-ink/95">
+              <div className="break-words text-[13.5px] leading-[1.68] text-ink/95">
                 <Markdown text={item.text} />
-                {item.streaming && <StreamCursor />}
+                {item.streaming && (item.text ? <StreamCursor /> : <TypingDots />)}
               </div>
             )}
           </div>
@@ -275,17 +275,149 @@ function StreamCursor() {
   return <span ref={ref} className="ml-0.5 inline-block h-[1.05em] w-[0.5em] rounded-[1px] bg-amber align-[-0.15em]" />
 }
 
-// ── tool calls ───────────────────────────────────────────────────────────────
+const reducedMotion = () => Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)
 
-function ToolGroup({ tools, verbose, fresh }: { tools: ToolItem[]; verbose: boolean; fresh: boolean }) {
+/** Raciocínio sempre colapsado (abre sozinho só no verbose enquanto pensa). */
+function Reasoning({ text, live, verbose }: { text: string; live: boolean; verbose: boolean }) {
+  const [open, setOpen] = useState(verbose && live)
+  useEffect(() => {
+    if (verbose && live) setOpen(true)
+  }, [verbose, live])
+  const words = text.trim().split(/\s+/).length
   return (
-    <div className={`ml-8 flex flex-col gap-1 ${fresh ? 'hc-rise' : ''}`}>
-      {tools.map((t) => (
-        <ToolCard key={t.id} tool={t} verbose={verbose} />
-      ))}
+    <div className="mb-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded px-1 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-faint transition-colors hover:text-dim"
+      >
+        <span className={`inline-block transition-transform duration-150 ${open ? 'rotate-90' : ''}`}>▸</span>
+        {live ? <span className="hc-shimmer rounded px-1 text-dim">pensando…</span> : <span>raciocínio</span>}
+        <span className="normal-case tracking-normal text-faint/70">· {words} palavras</span>
+      </button>
+      {open && (
+        <div className="hc-fade-in mt-1 max-h-72 overflow-auto whitespace-pre-wrap border-l border-edge2 pl-3 text-[12px] leading-relaxed text-faint">
+          {text}
+        </div>
+      )}
     </div>
   )
 }
+
+/** Três pontos em onda (WAAPI) — indicador de "digitando" antes do 1º token. */
+function TypingDots({ className = '' }: { className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || reducedMotion()) return
+    const anims = Array.from(el.children).map((c, i) =>
+      (c as HTMLElement).animate(
+        [
+          { transform: 'translateY(0)', opacity: 0.35 },
+          { transform: 'translateY(-3px)', opacity: 1 },
+          { transform: 'translateY(0)', opacity: 0.35 },
+        ],
+        { duration: 900, iterations: Infinity, delay: i * 140, easing: 'ease-in-out' },
+      ),
+    )
+    return () => anims.forEach((a) => a.cancel())
+  }, [])
+  return (
+    <span ref={ref} aria-label="digitando" className={`inline-flex items-end gap-[3px] align-middle ${className}`}>
+      {[0, 1, 2].map((i) => (
+        <span key={i} className="inline-block h-[5px] w-[5px] rounded-full bg-amber opacity-40" />
+      ))}
+    </span>
+  )
+}
+
+function BounceArrow({ active }: { active: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !active || reducedMotion()) return
+    const a = el.animate([{ transform: 'translateY(-1px)' }, { transform: 'translateY(2px)' }, { transform: 'translateY(-1px)' }], {
+      duration: 1100,
+      iterations: Infinity,
+      easing: 'ease-in-out',
+    })
+    return () => a.cancel()
+  }, [active])
+  return (
+    <span ref={ref} className="inline-block text-amber">
+      ↓
+    </span>
+  )
+}
+
+// ── tool calls ───────────────────────────────────────────────────────────────
+
+/** Ações do turno: 1 ferramenta = card direto; várias = card "N ações" com timeline.
+ *  Abre sozinho enquanto alguma roda ou se tem delegação ao Claude Code. */
+function ToolGroup({ tools, verbose, fresh }: { tools: ToolItem[]; verbose: boolean; fresh: boolean }) {
+  const runningN = tools.filter((t) => t.status === 'running').length
+  const failedN = tools.filter((t) => t.status !== 'running' && looksFailed(t)).length
+  const delegated = tools.some((t) => DELEGATION_RE.test(t.name))
+  const [userOpen, setUserOpen] = useState<boolean | null>(null)
+  const open = userOpen ?? (verbose || runningN > 0 || delegated)
+  if (tools.length === 1)
+    return (
+      <div className={`ml-8 ${fresh ? 'hc-rise' : ''}`}>
+        <ToolCard tool={tools[0]} verbose={verbose} />
+      </div>
+    )
+  const total = tools.reduce((acc, t) => acc + (t.duration ?? 0), 0)
+  const names = [...new Set(tools.map((t) => t.name))]
+  const current = [...tools].reverse().find((t) => t.status === 'running')
+  return (
+    <div className={`ml-8 overflow-hidden rounded-lg border bg-panel/50 ${runningN ? 'border-amber/35' : failedN ? 'border-alert/30' : 'border-edge'} ${fresh ? 'hc-rise' : ''}`}>
+      <button
+        type="button"
+        onClick={() => setUserOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[11px] hover:bg-panel2/70"
+      >
+        <span className={`inline-block w-3 text-faint transition-transform duration-150 ${open ? 'rotate-90' : ''}`}>▸</span>
+        <span className={`label tracking-[0.14em] ${runningN ? 'text-amber' : 'text-ink/85'}`}>{tools.length} ações</span>
+        <span className="flex shrink-0 items-center gap-0.5" aria-hidden>
+          {tools.slice(0, 14).map((t) => (
+            <span
+              key={t.id}
+              className={`h-1.5 w-1.5 rounded-full ${t.status === 'running' ? 'hc-pulse-dot bg-amber' : looksFailed(t) ? 'bg-alert' : 'bg-phos/70'}`}
+            />
+          ))}
+        </span>
+        <span className="min-w-0 truncate text-faint">
+          {current ? `${current.name}${current.context ? ` · ${current.context}` : ''}` : names.slice(0, 4).join(' · ')}
+        </span>
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-2 text-[10.5px] text-faint">
+          {failedN > 0 && <span className="text-alert">{failedN} falha(s)</span>}
+          {total > 0 && <span className="tabular-nums">{fmtDur(total)}</span>}
+          {runningN ? <span className="hc-pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-amber" /> : <span className={failedN ? 'text-alert' : 'text-phos'}>{failedN ? '!' : '✓'}</span>}
+        </span>
+      </button>
+      {open && (
+        <ol className="hc-fade-in relative border-t border-edge/60 py-1.5 pl-5 pr-2">
+          <span className="absolute bottom-3 left-[13px] top-3 w-px bg-edge2" aria-hidden />
+          {tools.map((t) => (
+            <li key={t.id} className="relative py-0.5 pl-3">
+              <span
+                aria-hidden
+                className={`absolute left-[-10px] top-[11px] h-[7px] w-[7px] rounded-full border ${
+                  t.status === 'running' ? 'hc-pulse-dot border-amber bg-amber' : looksFailed(t) ? 'border-alert bg-alert/70' : 'border-phos/60 bg-void'
+                }`}
+              />
+              <ToolCard tool={t} verbose={verbose} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+const DELEGATION_RE = /claude_(spawn|spawn_many|send)/
 
 function toolIcon(name: string): string {
   const n = name.toLowerCase()
@@ -353,7 +485,7 @@ function ToolCard({ tool, verbose }: { tool: ToolItem; verbose: boolean }) {
           {hasDetail && <span className="text-faint">{open ? '▾' : '▸'}</span>}
         </span>
       </button>
-      {/claude_(spawn|spawn_many|send)/.test(tool.name) && <DelegationStrip tool={tool} />}
+      {DELEGATION_RE.test(tool.name) && <DelegationStrip tool={tool} />}
       {!open && verbose && tool.summary && <div className="truncate border-t border-edge/60 px-2.5 py-0.5 pl-8 text-faint">{tool.summary}</div>}
       {open && (
         <div className="hc-fade-in space-y-1.5 border-t border-edge/60 px-2.5 py-2">
@@ -378,12 +510,17 @@ function ToolCard({ tool, verbose }: { tool: ToolItem; verbose: boolean }) {
   )
 }
 
-function TurnIndicator({ status }: { status: string }) {
+function TurnIndicator({ status, monogram }: { status: string; monogram: string }) {
   return (
-    <div className="hc-fade-in ml-8 flex items-center gap-2 text-[11.5px] text-amber">
-      <span className="inline-block h-3 w-3 animate-spin rounded-full border border-amber/30 border-t-amber" />
-      <span className="label text-amber">turno ativo</span>
-      {status && <span className="truncate text-dim">· {status}</span>}
+    <div className="hc-fade-in flex items-center gap-2.5 text-[11.5px]" role="status" aria-live="polite">
+      <span className="flex h-6 w-6 shrink-0 select-none items-center justify-center rounded-md border border-amber/50 bg-panel text-[11px] font-semibold text-amber hc-glow-amber">
+        {monogram}
+      </span>
+      <span className="flex min-w-0 items-center gap-2 rounded-full border border-edge bg-panel/60 px-2.5 py-1">
+        <TypingDots />
+        <span className="label tracking-[0.14em] text-amber">trabalhando</span>
+        {status && <span className="min-w-0 truncate text-dim">· {status}</span>}
+      </span>
     </div>
   )
 }
@@ -405,12 +542,14 @@ function DelegationStrip({ tool }: { tool: ToolItem }) {
   const runs = ids.map((id) => s.runs.find((r) => r.id === id)).filter((r): r is RunMeta => Boolean(r))
   const anyActive = runs.some((r) => isActive(r.status))
   const now = useNow(1000, anyActive)
+  const totalCost = runs.reduce((acc, r) => acc + (r.costUsd ?? 0), 0)
   if (!ids.length) return null
   return (
     <div className="hc-fade-in border-t border-edge/60 bg-void/40 px-2.5 py-1.5">
       <div className="mb-1 flex items-center gap-2 text-[10px]">
         <span className={`h-1.5 w-1.5 rotate-45 ${anyActive ? 'hc-pulse-dot bg-phos' : 'bg-faint'}`} />
         <span className="label text-[9.5px]">delegado ao Claude Code · {ids.length} instância(s)</span>
+        {totalCost > 0 && <span className="tabular-nums text-faint">{fmtCost(totalCost)}</span>}
         <button
           type="button"
           onClick={() => window.dispatchEvent(new CustomEvent('hc:view', { detail: 'swarm' }))}
@@ -421,16 +560,52 @@ function DelegationStrip({ tool }: { tool: ToolItem }) {
       </div>
       {ids.map((id) => {
         const r = runs.find((x) => x.id === id)
-        return (
-          <div key={id} className="flex min-w-0 items-center gap-2 py-0.5 text-[10.5px]">
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${r ? (isActive(r.status) ? 'hc-pulse-dot bg-phos' : r.status === 'done' ? 'bg-phos/60' : 'bg-alert') : 'bg-faint'}`} />
-            <span className="min-w-0 flex-1 truncate text-ink/90">{r?.title ?? id}</span>
-            {r && <span className="shrink-0 text-faint">{STATUS_LABEL[r.status]}</span>}
-            {r && <span className="shrink-0 tabular-nums text-faint">{fmtDuration(runElapsedMs(r, now))}</span>}
-            {r && isActive(r.status) && <span className="h-1 w-10 shrink-0 overflow-hidden rounded bg-edge"><span className="hc-shimmer block h-full w-full" /></span>}
-          </div>
-        )
+        return <DelegationRow key={id} id={id} run={r} now={now} />
       })}
+    </div>
+  )
+}
+
+/** Fase da run → preenchimento da mini barra (sem total conhecido: fila 8%, rodando
+ *  indeterminado, aguardando 60%, fim 100%). */
+function DelegationRow({ id, run: r, now }: { id: string; run: RunMeta | undefined; now: number }) {
+  const active = r ? isActive(r.status) : false
+  const tone = !r ? 'bg-faint' : r.status === 'done' ? 'bg-phos' : r.status === 'error' ? 'bg-alert' : r.status === 'cancelled' ? 'bg-faint' : r.status === 'waiting_approval' ? 'bg-amber' : 'bg-phos'
+  const pct = !r ? 0 : r.status === 'queued' ? 8 : r.status === 'waiting_approval' ? 60 : 100
+  const openHere = (mode: 'watch' | 'resume') => {
+    invoke<{ cwd: string; cmd: string; title: string }>('swarm:terminalCommand', id, mode)
+      .then((t) => requestTerminal(t))
+      .catch((e: unknown) => toast({ title: 'Não abriu no app', detail: errMsg(e), tone: 'error' }))
+  }
+  return (
+    <div className="group/run flex min-w-0 flex-col gap-1 py-1 text-[10.5px]">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? `hc-pulse-dot ${tone}` : tone}`} />
+        <span className="min-w-0 flex-1 truncate text-ink/90" title={r?.task || id}>
+          {r?.title ?? id}
+        </span>
+        {r?.repo && <span className="hidden shrink-0 truncate text-faint sm:inline">{r.repo.split('/').filter(Boolean).at(-1)}</span>}
+        {r && <span className={`shrink-0 ${r.status === 'error' ? 'text-alert' : r.status === 'waiting_approval' ? 'text-amber' : 'text-faint'}`}>{STATUS_LABEL[r.status]}</span>}
+        {r?.numTurns != null && <span className="shrink-0 tabular-nums text-faint">{r.numTurns}t</span>}
+        {r && <span className="shrink-0 tabular-nums text-faint">{fmtDuration(runElapsedMs(r, now))}</span>}
+        {r?.costUsd != null && <span className="shrink-0 tabular-nums text-dim">{fmtCost(r.costUsd)}</span>}
+        <button
+          type="button"
+          onClick={() => openHere(active ? 'watch' : 'resume')}
+          title={active ? 'acompanhar no terminal do cockpit' : 'retomar a sessão do Claude Code no terminal do cockpit'}
+          className="shrink-0 rounded border border-edge2 px-1.5 text-[10px] text-dim opacity-70 transition-opacity hover:border-phos/60 hover:text-phos group-hover/run:opacity-100"
+        >
+          abrir aqui
+        </button>
+      </div>
+      <span className="relative ml-3.5 block h-[3px] overflow-hidden rounded-full bg-edge" aria-hidden>
+        {r && (
+          <span
+            className={`absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ${tone} ${r.status === 'running' ? 'hc-shimmer opacity-80' : 'opacity-70'}`}
+            style={{ width: `${pct}%` }}
+          />
+        )}
+      </span>
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import type { ViewId } from '../../lib/layout'
 import {
-  DEFAULT_REGIONS,
+  LAYOUT_PRESETS,
   PANELS,
   PANEL_BY_ID,
   REGION_LABELS,
@@ -21,6 +22,11 @@ import {
   type ThemePreset,
   type ThemeSettings,
 } from '../../lib/theme'
+import { SPACES, type Space } from '../../lib/space'
+import { Icon } from '../ui/Icon'
+import { VIEW_BY_ID } from './views'
+
+export type SettingsTab = 'aparencia' | 'views' | 'paineis'
 
 interface Props {
   theme: ThemeSettings
@@ -30,7 +36,13 @@ interface Props {
   onResetRegions: () => void
   onResetSizes: () => void
   onClose: () => void
-  initialTab?: 'aparencia' | 'paineis'
+  initialTab?: SettingsTab
+  /** espaço ativo (views, painéis e presets valem só para ele) */
+  space: Space
+  viewOrder: ViewId[]
+  hiddenViews: ViewId[]
+  onViews: (order: ViewId[], hidden: ViewId[]) => void
+  onPreset: (id: string) => void
 }
 
 const PRESET_SWATCH: Record<ThemePreset, [string, string]> = {
@@ -43,7 +55,8 @@ const PRESET_SWATCH: Record<ThemePreset, [string, string]> = {
 // Painel de configurações (⚙ na topbar / ⌘,): tema, accent, fonte, escala
 // (densidade) e layout dos painéis por região. Tudo aplica ao vivo.
 export function SettingsPanel(p: Props) {
-  const [tab, setTab] = useState<'aparencia' | 'paineis'>(p.initialTab ?? 'aparencia')
+  const [tab, setTab] = useState<SettingsTab>(p.initialTab ?? 'aparencia')
+  const spaceLabel = SPACES.find((x) => x.id === p.space)?.label ?? p.space
   const t = p.theme
   const set = (patch: Partial<ThemeSettings>) => p.onTheme({ ...t, ...patch })
 
@@ -62,20 +75,22 @@ export function SettingsPanel(p: Props) {
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
+          <Icon name="settings" size={13} className="text-space" />
           <span className="label">Configurações</span>
           <button
             type="button"
             onClick={p.onClose}
-            className="ml-auto rounded px-2 text-faint hover:text-ink"
+            className="hc-press ml-auto flex h-6 w-6 items-center justify-center rounded text-faint hover:bg-panel2 hover:text-ink"
             aria-label="fechar"
           >
-            ✕
+            <Icon name="close" size={12} />
           </button>
         </div>
         <div className="flex gap-1 border-b border-edge px-3 pt-2">
           {(
             [
               ['aparencia', 'Aparência'],
+              ['views', 'Views'],
               ['paineis', 'Painéis'],
             ] as const
           ).map(([id, label]) => (
@@ -84,7 +99,7 @@ export function SettingsPanel(p: Props) {
               type="button"
               onClick={() => setTab(id)}
               className={`-mb-px rounded-t-md border px-3 py-1.5 text-[11px] ${
-                tab === id ? 'border-edge2 border-b-panel bg-panel2 text-ink' : 'border-transparent text-faint hover:text-dim'
+                tab === id ? 'border-edge2 border-b-panel2 bg-panel2 text-ink' : 'border-transparent text-faint hover:text-dim'
               }`}
             >
               {label}
@@ -190,8 +205,29 @@ export function SettingsPanel(p: Props) {
                 Restaurar aparência padrão
               </button>
             </>
+          ) : tab === 'views' ? (
+            <ViewsEditor space={spaceLabel} order={p.viewOrder} hidden={p.hiddenViews} onChange={p.onViews} />
           ) : (
             <>
+              <Section titulo={`Presets · espaço ${spaceLabel}`}>
+                <div className="hc-stagger grid gap-1.5">
+                  {LAYOUT_PRESETS.map((pr) => (
+                    <button
+                      key={pr.id}
+                      type="button"
+                      onClick={() => p.onPreset(pr.id)}
+                      className="hc-card hc-card-hover flex items-start gap-2.5 px-3 py-2 text-left"
+                    >
+                      <Icon name={pr.icon} size={14} className="mt-[1px] text-space" />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] text-ink">{pr.label}</span>
+                        <span className="block text-[10px] leading-snug text-faint">{pr.hint}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[10px] text-faint">aplicar troca a view, os painéis abertos e os blocos das regiões só deste espaço.</p>
+              </Section>
               {(Object.keys(REGION_LABELS) as Region[]).map((region) => (
                 <RegionEditor
                   key={region}
@@ -205,7 +241,7 @@ export function SettingsPanel(p: Props) {
                   type="button"
                   onClick={p.onResetRegions}
                   className="rounded border border-edge2 px-3 py-1.5 text-[11px] text-dim hover:text-ink"
-                  title={`padrão: strip = ${DEFAULT_REGIONS.strip.join(', ')}; dock = ${DEFAULT_REGIONS.dock.join(', ')}`}
+                  title={`volta os blocos das regiões ao padrão do espaço ${spaceLabel}`}
                 >
                   Restaurar painéis padrão
                 </button>
@@ -224,6 +260,86 @@ export function SettingsPanel(p: Props) {
     </div>
   )
 }
+
+function ViewsEditor({
+  space,
+  order,
+  hidden,
+  onChange,
+}: {
+  space: string
+  order: ViewId[]
+  hidden: ViewId[]
+  onChange: (order: ViewId[], hidden: ViewId[]) => void
+}) {
+  const visibleCount = order.filter((v) => !hidden.includes(v)).length
+  const move = (i: number, d: -1 | 1) => {
+    const j = i + d
+    if (j < 0 || j >= order.length) return
+    const next = [...order]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    onChange(next, hidden)
+  }
+  let n = 0
+  return (
+    <Section titulo={`Views da barra · espaço ${space}`}>
+      <ul className="hc-stagger space-y-1">
+        {order.map((id, i) => {
+          const v = VIEW_BY_ID[id]
+          const off = hidden.includes(id)
+          const key = off ? null : ++n
+          return (
+            <li key={id} className={`flex items-center gap-2 rounded-md border px-2 py-1.5 ${off ? 'border-edge/60 text-faint' : 'border-edge text-ink'}`}>
+              <Icon name={v.icon} size={13} className={off ? 'text-faint' : 'text-space'} />
+              <span className="min-w-0 flex-1 truncate">{v.label}</span>
+              {key != null && key <= 9 && <span className="text-[10px] text-faint tabular-nums">⌘{key}</span>}
+              <button
+                type="button"
+                onClick={() => onChange(order, off ? hidden.filter((x) => x !== id) : [...hidden, id])}
+                disabled={!off && visibleCount <= 1}
+                className="hc-press flex h-5 w-5 items-center justify-center rounded text-faint enabled:hover:text-ink disabled:opacity-30"
+                aria-label={off ? `mostrar ${v.label}` : `esconder ${v.label}`}
+                title={off ? 'mostrar na barra' : 'esconder da barra (continua no ⌘K)'}
+              >
+                <Icon name={off ? 'eyeOff' : 'eye'} size={12} />
+              </button>
+              <button
+                type="button"
+                disabled={i === 0}
+                onClick={() => move(i, -1)}
+                className="px-1 text-faint enabled:hover:text-ink disabled:opacity-30"
+                aria-label="mover para antes"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                disabled={i === order.length - 1}
+                onClick={() => move(i, 1)}
+                className="px-1 text-faint enabled:hover:text-ink disabled:opacity-30"
+                aria-label="mover para depois"
+              >
+                ↓
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-2 text-[10px] leading-relaxed text-faint">
+        dica: arraste as abas na topbar para reordenar. ⌘1..⌘{Math.min(9, visibleCount)} seguem a ordem das visíveis.
+      </p>
+      <button
+        type="button"
+        onClick={() => onChange([...VIEW_ORDER_DEFAULT], [])}
+        className="mt-2 rounded border border-edge2 px-3 py-1.5 text-[11px] text-dim hover:text-ink"
+      >
+        Restaurar views padrão
+      </button>
+    </Section>
+  )
+}
+
+const VIEW_ORDER_DEFAULT = Object.keys(VIEW_BY_ID) as ViewId[]
 
 function Section({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
@@ -260,8 +376,9 @@ function RegionEditor({
                 className="accent-amber"
                 aria-label={`remover ${def.titulo}`}
               />
-              <span className="min-w-0 flex-1 truncate text-ink">{def.titulo}</span>
-              <span className="text-[10px] text-faint">{def.fonte.join(' ') || 'sem fonte'}</span>
+              {def.icon && <Icon name={def.icon} size={12} className="text-space" />}
+              <span className="min-w-0 flex-1 truncate text-ink" title={def.descricao}>{def.titulo}</span>
+              <span className="max-w-[90px] truncate text-[10px] text-faint">{def.fonte.join(' ') || 'sem fonte'}</span>
               <button
                 type="button"
                 disabled={i === 0}
@@ -292,8 +409,8 @@ function RegionEditor({
               className="accent-amber"
               aria-label={`adicionar ${def.titulo}`}
             />
-            <span className="min-w-0 flex-1 truncate">{def.titulo}</span>
-            <span className="text-[10px] text-faint">{def.fonte.join(' ') || 'sem fonte'}</span>
+            <span className="min-w-0 flex-1 truncate" title={def.descricao}>{def.titulo}</span>
+            <span className="max-w-[90px] truncate text-[10px] text-faint">{def.fonte.join(' ') || 'sem fonte'}</span>
           </li>
         ))}
       </ul>

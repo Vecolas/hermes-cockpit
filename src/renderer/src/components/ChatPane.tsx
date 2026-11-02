@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { BOT_TITLES, type BotProfile } from '../lib/bots'
 import { chatReducer, initialChat, type PendingApproval } from '../lib/chat-store'
 import { api } from '../lib/ipc'
-import { HERMES_APPROVAL_LABEL, type HermesApproval } from '../lib/automode'
+import { HERMES_APPROVAL_LABEL, setAutoMode, useAutoMode, type HermesApproval } from '../lib/automode'
+import { SPACES, inSpace, spaceOfBot, useSpace } from '../lib/space'
 import { openChatWindow } from '../lib/windows'
 import { toast } from '../lib/toast'
 import {
@@ -764,6 +765,23 @@ export function ChatPane({ rpc, bot, connState }: Props) {
     const cur = (approvalMode ?? 'manual') as HermesApproval
     applyApproval(order[(order.indexOf(cur) + 1) % order.length] ?? 'manual')
   }
+  const autoOn = useAutoMode()
+  const space = useSpace()
+  const outOfSpace = Boolean(profile) && !inSpace(spaceOfBot(profile ?? ''), space)
+  const spaceLabel = SPACES.find((x) => x.id === space)?.label ?? space
+  // gaveta de sessões começa logo abaixo do header (+ aviso de espaço, se houver)
+  const headerRef = useRef<HTMLDivElement>(null)
+  const [headerH, setHeaderH] = useState(45)
+  useLayoutEffect(() => {
+    const el = headerRef.current
+    if (!el) return
+    const measure = () => setHeaderH(el.offsetHeight + (el.nextElementSibling?.getAttribute('role') === 'status' ? (el.nextElementSibling as HTMLElement).offsetHeight : 0))
+    measure()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null
+    ro?.observe(el)
+    return () => ro?.disconnect()
+  }, [outOfSpace])
+
   const composerDisabled = !online || load.phase !== 'ready' || !sid
   const disabledReason = !rpc || connState !== 'open'
     ? 'backend desconectado'
@@ -780,57 +798,97 @@ export function ChatPane({ rpc, bot, connState }: Props) {
 
   return (
     <section className="relative flex h-full min-h-0 w-full flex-col bg-void scanlines">
-      {/* header compacto */}
-      <div className="relative z-20 flex min-w-0 items-center gap-2.5 border-b border-edge px-4 py-1.5">
+      {/* header: identidade · grupo (modelo | aprovação | AUTO) · utilidades */}
+      <div ref={headerRef} className="relative z-20 flex min-w-0 items-center gap-3 border-b border-edge px-4 py-1.5">
         <span
-          className={`flex h-6 w-6 shrink-0 select-none items-center justify-center rounded-md border bg-panel text-[11px] font-semibold ${
+          className={`flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-lg border bg-panel text-[12px] font-semibold transition-colors ${
             chat.running ? 'border-amber/60 text-amber hc-glow-amber' : 'border-edge2 text-dim'
           }`}
         >
           {monogram}
         </span>
-        <span className="font-display min-w-0 shrink truncate text-[15px] text-ink">{title}</span>
-        <div className="relative min-w-0 shrink">
+        <div className="flex min-w-0 shrink flex-col leading-tight">
+          <span className="font-display min-w-0 truncate text-[15px] text-ink">{title}</span>
+          <span className="min-w-0 truncate font-mono text-[9.5px] uppercase tracking-[0.16em] text-faint">
+            {activeTab.kind === 'canonical' ? 'bot chat' : `side-chat · ${activeTab.title}`}
+            {chat.running && <span className="text-amber"> · em turno</span>}
+          </span>
+        </div>
+        <div className="relative flex min-w-0 shrink items-stretch rounded-md border border-edge bg-panel/50 text-[11px]">
           <button
             data-model-chip
             disabled={!profile || !online}
             onClick={() => setPickerOpen((v) => !v)}
             title={modelError ?? 'trocar modelo'}
-            className={`flex max-w-[340px] items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
-              pickerOpen ? 'border-amber/60 text-ink' : 'border-edge text-dim hover:border-amber/50 hover:text-ink'
+            className={`flex min-w-0 max-w-[300px] items-center gap-1.5 rounded-l-md px-2 py-0.5 transition-colors disabled:opacity-50 ${
+              pickerOpen ? 'bg-panel2 text-ink' : 'text-dim hover:bg-panel2 hover:text-ink'
             }`}
           >
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber/80" />
             <span className="truncate">{modelName ?? (modelError ? 'erro' : '—')}</span>
             {liveModel && <span className="shrink-0 text-[10px] text-cyanic">este chat</span>}
-            {fallbackName && <span className="hidden truncate text-faint sm:inline">· fb {fallbackName}</span>}
+            {fallbackName && <span className="hidden truncate text-faint xl:inline">· fb {fallbackName}</span>}
             <span className="shrink-0 text-faint">▾</span>
           </button>
+          <button
+            type="button"
+            onClick={cycleApproval}
+            disabled={!sid}
+            title="modo de aprovação do Hermes nesta sessão — clique para alternar: manual → auto (smart) → yolo (off)"
+            className={`shrink-0 border-l border-edge px-2 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors disabled:opacity-40 ${
+              approvalMode === 'off'
+                ? 'text-alert hover:bg-alert/10'
+                : approvalMode === 'smart'
+                  ? 'text-phos hover:bg-phos/10'
+                  : 'text-faint hover:bg-panel2 hover:text-dim'
+            }`}
+          >
+            {approvalMode === 'off' ? '⚡ yolo' : approvalMode === 'smart' ? '◎ auto' : '◌ manual'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void setAutoMode(!autoOn)}
+            aria-pressed={autoOn}
+            title={autoOn ? 'AUTO global ligado (Hermes smart + swarm auto) — clique para desligar' : 'ligar AUTO global: Hermes smart + swarm --permission-mode auto'}
+            className={`flex shrink-0 items-center gap-1 rounded-r-md border-l border-edge px-2 font-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
+              autoOn ? 'bg-phos/10 text-phos hc-glow-phos' : 'text-faint hover:bg-panel2 hover:text-dim'
+            }`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${autoOn ? 'hc-pulse-dot bg-phos' : 'bg-edge2'}`} />
+            auto
+          </button>
           {pickerOpen && rpc && profile && (
-            <ModelPicker
-              rpc={rpc}
-              profile={profile}
-              botTitle={title}
-              sessionId={sid}
-              isBotChat={activeTab.kind === 'canonical'}
-              currentModel={modelName}
-              currentProvider={liveModel?.provider ?? model?.provider ?? null}
-              fallback={model?.fallback ?? []}
-              onClose={() => setPickerOpen(false)}
-              onSwitched={(r) => {
-                dispatch({ type: 'note', tone: 'info', text: r.note })
-                if (r.scope === 'chat') setSessionModel({ key: activeKey, model: r.model, provider: r.provider })
-                else setSessionModel(null)
-                if (rpc && profile) getProfileModel(rpc, profile).then(setModel).catch(() => {})
-              }}
-            />
+              <ModelPicker
+                rpc={rpc}
+                profile={profile}
+                botTitle={title}
+                sessionId={sid}
+                isBotChat={activeTab.kind === 'canonical'}
+                currentModel={modelName}
+                currentProvider={liveModel?.provider ?? model?.provider ?? null}
+                fallback={model?.fallback ?? []}
+                onClose={() => setPickerOpen(false)}
+                onSwitched={(r) => {
+                  dispatch({ type: 'note', tone: 'info', text: r.note })
+                  if (r.scope === 'chat') setSessionModel({ key: activeKey, model: r.model, provider: r.provider })
+                  else setSessionModel(null)
+                  if (rpc && profile) getProfileModel(rpc, profile).then(setModel).catch(() => {})
+                }}
+              />
           )}
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-2.5">
-          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-dim" title="mostrar raciocínio e resumos de ferramentas">
-            <input type="checkbox" checked={verbose} onChange={(e) => setVerbose(e.target.checked)} className="accent-amber" />
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setVerbose((v) => !v)}
+            aria-pressed={verbose}
+            title="verbose: abre ações e raciocínio automaticamente"
+            className={`rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+              verbose ? 'text-amber' : 'text-faint hover:text-dim'
+            }`}
+          >
             verbose
-          </label>
+          </button>
           <button
             disabled={!profile || !online}
             onClick={() => {
@@ -838,16 +896,26 @@ export function ChatPane({ rpc, bot, connState }: Props) {
               setDrawerOpen((v) => !v)
             }}
             title={sideError ?? 'sessões do bot'}
-            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 ${
+            className={`flex items-center gap-1.5 rounded border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors disabled:opacity-50 ${
               drawerOpen ? 'border-amber/60 text-amber' : sideError ? 'border-alert/40 text-alert' : 'border-edge text-dim hover:border-amber/50 hover:text-ink'
             }`}
           >
-            ☰ sessões
-            {sideChats.length > 0 && <span className="text-[10px] text-faint">{sideChats.length}</span>}
+            sessões
+            {sideChats.length > 0 && <span className="tabular-nums text-faint">{sideChats.length}</span>}
           </button>
           <ConnBadge state={connState} />
         </div>
       </div>
+
+      {outOfSpace && (
+        <div className="hc-fade-in flex items-center gap-2 border-b border-edge bg-amber/[0.04] px-4 py-1 text-[11px] text-dim" role="status">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber/70" />
+          <span className="min-w-0 truncate">
+            <span className="text-ink/90">{title}</span> não pertence ao espaço <span className="label text-amber">{spaceLabel}</span> — a conversa segue
+            aberta; troque de bot na rail.
+          </span>
+        </div>
+      )}
 
       {profile && online && (
         <ChatTabs
@@ -868,7 +936,7 @@ export function ChatPane({ rpc, bot, connState }: Props) {
       )}
 
       {drawerOpen && rpc && profile && online && (
-        <div className="absolute inset-x-0 bottom-0 top-[37px] z-30">
+        <div className="absolute inset-x-0 bottom-0 z-30" style={{ top: headerH }}>
           <div className="absolute inset-0 bg-void/40" onClick={() => setDrawerOpen(false)} />
           <SessionDrawer
             rpc={rpc}
@@ -976,27 +1044,8 @@ export function ChatPane({ rpc, bot, connState }: Props) {
         prefill={prefill}
         onSend={onSend}
         onCancel={onCancel}
-        footerExtra={
-          <button
-            type="button"
-            onClick={cycleApproval}
-            disabled={!sid}
-            title="modo de aprovação do Hermes — clique para alternar: manual → auto (smart) → yolo (off)"
-            className={`rounded border px-1.5 py-0.5 text-[10.5px] uppercase tracking-wider transition-colors disabled:opacity-40 ${
-              approvalMode === 'off'
-                ? 'border-alert/50 text-alert'
-                : approvalMode === 'smart'
-                  ? 'border-phos/50 text-phos'
-                  : 'border-edge2 text-faint hover:text-dim'
-            }`}
-          >
-            {approvalMode === 'off' ? '⚡ yolo' : approvalMode === 'smart' ? '◎ auto' : '◌ manual'}
-          </button>
-        }
-        footerRight={modelName ?? undefined}
         footerLeft={
           [
-            target.kind === 'canonical' ? 'Bot Chat' : `side-chat · ${target.title}`,
             ctxPct !== null ? `contexto ${ctxPct}%` : null,
             totalTok !== null ? `${totalTok.toLocaleString('pt-BR')} tokens` : null,
           ]

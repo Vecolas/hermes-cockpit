@@ -4,6 +4,7 @@ import { safeStorage } from '../../lib/layout'
 import { PANELS, PANEL_BY_ID, type Region } from '../../lib/panels'
 import { ErrorBoundary } from '../ErrorBoundary'
 import { ResizeHandle } from '../layout/ResizeHandle'
+import { Icon } from '../ui/Icon'
 
 // Região editável de blocos do registry (strip, cards do dock, rodapé da rail).
 // - cada bloco vira um Panel redimensionável, com alça entre vizinhos;
@@ -104,13 +105,13 @@ function BlockToolbar({
   return (
     <div className="hc-glass pointer-events-none absolute top-1.5 right-1.5 z-10 flex -translate-y-0.5 items-center gap-0.5 rounded-md px-0.5 opacity-0 transition-[opacity,translate] duration-[var(--hc-dur-2)] group-hover/block:pointer-events-auto group-hover/block:translate-y-0 group-hover/block:opacity-100 focus-within:pointer-events-auto focus-within:translate-y-0 focus-within:opacity-100">
       <button type="button" className={btn} disabled={!canBack} onClick={() => onMove(-1)} title="mover para trás">
-        {horizontal ? '◂' : '▴'}
+        <Icon name="chevronRight" size={11} className={horizontal ? 'rotate-180' : '-rotate-90'} />
       </button>
       <button type="button" className={btn} disabled={!canFwd} onClick={() => onMove(1)} title="mover para frente">
-        {horizontal ? '▸' : '▾'}
+        <Icon name="chevronRight" size={11} className={horizontal ? '' : 'rotate-90'} />
       </button>
       <button type="button" className={`${btn} hover:!text-alert`} onClick={onHide} title={`esconder "${titulo}" (volta pelo +)`}>
-        ×
+        <Icon name="close" size={10} />
       </button>
     </div>
   )
@@ -155,14 +156,14 @@ function AddMenu({
         onClick={() => setOpen((v) => !v)}
         title="adicionar bloco"
         aria-expanded={open}
-        className={`hc-press flex h-5 w-5 items-center justify-center rounded border bg-panel text-[12px] hover:border-amber/60 hover:text-amber ${
-          open ? 'border-amber/60 text-amber' : 'border-edge2 text-dim'
+        className={`hc-press flex h-5 w-5 items-center justify-center rounded border bg-panel text-[12px] hover:border-space/60 hover:text-space ${
+          open ? 'border-space/60 text-space' : 'border-edge2 text-dim'
         }`}
       >
-        <span className={`transition-transform duration-[var(--hc-dur-2)] ${open ? 'rotate-45' : ''}`}>+</span>
+        <Icon name="plus" size={11} className={`transition-transform duration-[var(--hc-dur-2)] ${open ? 'rotate-45' : ''}`} />
       </button>
       {open && (
-        <div className="hc-glass hc-pop absolute right-0 bottom-6 min-w-[200px] rounded-md py-1" role="menu">
+        <div className="hc-glass hc-pop hc-stagger absolute right-0 bottom-6 max-h-[320px] min-w-[240px] overflow-y-auto rounded-md py-1" role="menu">
           <div className="label px-3 pb-1 pt-0.5">adicionar bloco</div>
           {hidden.map((p) => (
             <button
@@ -173,10 +174,14 @@ function AddMenu({
                 setOpen(false)
               }}
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] text-dim transition-colors hover:bg-panel2 hover:text-ink"
+              className="group/add flex w-full items-start gap-2 px-3 py-1.5 text-left text-[11px] text-dim transition-colors hover:bg-panel2 hover:text-ink"
+              title={p.descricao}
             >
-              <span aria-hidden className="text-faint">+</span>
-              {p.titulo}
+              <Icon name={p.icon ?? 'plus'} size={12} className="mt-[1px] text-faint group-hover/add:text-space" />
+              <span className="min-w-0">
+                <span className="block truncate">{p.titulo}</span>
+                {p.descricao && <span className="block truncate text-[9.5px] text-faint">{p.descricao}</span>}
+              </span>
             </button>
           ))}
         </div>
