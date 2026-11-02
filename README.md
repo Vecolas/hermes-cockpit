@@ -1,48 +1,46 @@
 # Hermes Cockpit
 
-Cockpit local para o Hermes Agent — Electron + React + Tailwind, falando com o
-`hermes serve` local. Não modifica nada do Hermes: o app spawna o backend
-(`hermes serve --host 127.0.0.1 --port 0`), lê a porta do sentinel
-`HERMES_BACKEND_READY` e injeta o token de sessão via `HERMES_DASHBOARD_SESSION_TOKEN`.
+Hermes Cockpit is a local desktop app that acts as a command center for the
+Hermes Agent. It shows your bots, chat, terminal, diffs, previews, files and
+status in a single resizable window.
 
-## Rodar
+## Stack
+
+- Electron 40 (main process, IPC and WebSocket proxy)
+- React 19, TypeScript and Tailwind CSS 4 (renderer)
+- Vite 8 with electron-vite
+
+## Prerequisites
+
+- Node.js (a current LTS release or newer) and npm
+- Hermes Agent CLI (`hermes`) installed and available on your `PATH`
+
+## Usage
 
 ```bash
 npm install
-npm run dev        # abre a janela do Electron (renderer também fica acessível no navegador)
-npm run dev:web    # só o renderer no navegador (pede URL + token manualmente)
-npm run build      # build de produção em out/
-npm run typecheck
-npm run dist       # gera a DMG em release/ (Electron 40, sem assinatura)
+npm run dev          # start the Electron app in development
+npm run typecheck    # TypeScript check (tsc --noEmit)
+npm run build        # production build into out/
+npm run dist         # build and package a macOS DMG into release/
 ```
 
-**Atenção — `ELECTRON_RUN_AS_NODE`:** se o app falhar com
-`The requested module 'electron' does not provide an export named ...`,
-o ambiente do seu shell está com essa variável setada (alguns hosts Electron a exportam).
-Rode com `env -u ELECTRON_RUN_AS_NODE npm run dev`. A variável não existe no
-launchd do macOS, então o app empacotado aberto pelo Finder não é afetado.
+`npm run dev:web` runs only the renderer in a browser; it needs a backend URL
+and token entered manually.
 
-A DMG não é assinada: na primeira abertura, clique com o botão direito → Abrir.
+If the app fails with `The requested module 'electron' does not provide an
+export named ...`, your shell has `ELECTRON_RUN_AS_NODE` set. Run
+`env -u ELECTRON_RUN_AS_NODE npm run dev` instead.
 
-## O que já funciona
+The DMG is unsigned. On first launch, right-click the app and choose Open.
 
-- **Rail de bots** — `profiles.list` via JSON-RPC (`/api/ws`), agrupado por esquadrão
-  (mesmo mapeamento `_BOT_GROUPS` do plugin cockpit).
-- **Status strip** — foco/time-boxing, cota R$ e inbox triada via REST do plugin
-  cockpit (`/api/plugins/cockpit/{foco,quota,inbox}`), com proxy pelo main process
-  (sem CORS, token fora do renderer).
-- **Tema grafite** — Tailwind v4, tokens em `src/renderer/src/index.css`.
+## Hermes backend
 
-## Próximas etapas
+The cockpit does not bundle or patch Hermes. On startup the main process
+spawns `hermes serve --host 127.0.0.1 --port 0`, reads the port from the
+backend ready sentinel, and passes the session token through the environment.
+The managed Hermes install (`~/.hermes/hermes-agent`) is consumed locally as
+read-only: do not modify it, since `hermes update` overwrites it.
 
-1. Chat com streaming (`prompt.*` + eventos de turno) contra o profile selecionado.
-2. Aba Terminal: xterm.js sobre `/api/pty`.
-3. Diff/Git, aprovações (computer use), painel de swarm.
-
-## Estrutura
-
-```
-src/main/      processo principal: spawn do serve, proxy REST, janela
-src/preload/   contextBridge (window.hermes)
-src/renderer/  React: App, components/, lib/ (rpc, connection, bots)
-```
+See `HANDOFF.md` for architecture notes and known gotchas, and
+`docs/GATEWAY.md` for the backend method map.
