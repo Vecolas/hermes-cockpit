@@ -4,7 +4,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, sep } from 'node:path'
+import { dirname, join, sep } from 'node:path'
 
 export const IS_WIN = process.platform === 'win32'
 export const IS_MAC = process.platform === 'darwin'
@@ -42,6 +42,30 @@ export const needsShell = (file: string): boolean => IS_WIN && /\.(cmd|bat)$/i.t
 /** Python de um venv (`bin/python` vs `Scripts/python.exe`). */
 export function venvPython(venvDir: string): string {
   return IS_WIN ? join(venvDir, 'Scripts', 'python.exe') : join(venvDir, 'bin', 'python')
+}
+
+/**
+ * Instalação do Hermes Agent, independente do perfil ativo: HERMES_AGENT_DIR →
+ * `$HERMES_HOME/hermes-agent` → instalação inferida de HERMES_BIN → diretório
+ * oficial em LOCALAPPDATA no Windows → `~/.hermes/hermes-agent`. Só vale
+ * candidato cujo python do venv existe. Sem nenhum válido, devolve o primeiro
+ * (erro explícito depois).
+ */
+export function resolveHermesAgent(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+  exists: (p: string) => boolean = existsSync,
+): { agentDir: string; python: string } {
+  const binHome = env.HERMES_BIN ? dirname(dirname(env.HERMES_BIN)) : undefined
+  const candidates = [
+    env.HERMES_AGENT_DIR,
+    env.HERMES_HOME ? join(env.HERMES_HOME, 'hermes-agent') : undefined,
+    binHome ? join(binHome, 'hermes-agent') : undefined,
+    env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'hermes', 'hermes-agent') : undefined,
+    join(home, '.hermes', 'hermes-agent'),
+  ].filter((d): d is string => !!d)
+  const agentDir = candidates.find((d) => exists(venvPython(join(d, 'venv')))) ?? candidates[0]
+  return { agentDir, python: venvPython(join(agentDir, 'venv')) }
 }
 
 /** `p` é `root` ou está dentro dele (separador da plataforma; case-insensitive no Windows). */

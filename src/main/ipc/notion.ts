@@ -18,7 +18,7 @@
 import { execFile } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { venvPython } from '../platform'
+import { resolveHermesAgent } from '../platform'
 import { handle } from './index'
 
 const NOTION_VERSION = '2025-09-03'
@@ -26,8 +26,9 @@ const API = 'https://api.notion.com/v1'
 export const TODO_DATA_SOURCE = '380a5c53-2df8-80fe-bd9d-000b2ff91729'
 
 const HERMES_HOME = process.env.HERMES_HOME || join(homedir(), '.hermes')
-const AGENT_DIR = join(HERMES_HOME, 'hermes-agent')
-const PY = venvPython(join(AGENT_DIR, 'venv'))
+// HERMES_HOME = perfil ATIVO (escopo de segredos); o código/venv do Hermes é
+// instalação compartilhada e pode não morar dentro do perfil.
+const { agentDir: AGENT_DIR, python: PY } = resolveHermesAgent()
 
 // Mesmo algoritmo de _secret() do plugin. Imprime só o valor (ou nada).
 const KEY_SCRIPT = `

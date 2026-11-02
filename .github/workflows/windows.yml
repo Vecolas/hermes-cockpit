@@ -24,7 +24,7 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
@@ -47,9 +47,56 @@ jobs:
       - name: Build unpacked Windows x64 app
         run: npx electron-builder --win --x64 --dir
 
-      - name: Electron smoke test (real packaged exe)
-        # Valida inicialização + renderer + navegação Chat/Swarm/Automações.
-        # NÃO valida integração viva com Hermes (sem backend/credenciais no CI).
+      - name: Install real Hermes Agent (official installer, pinned commit)
+        # Instalador oficial NousResearch/hermes-agent (scripts/install.ps1), baixado
+        # do MESMO commit fixado e executado sem interação (sem setup/login/chaves).
+        # O instalador provisiona uv + Python + venv e publica o launcher em
+        # %HERMES_HOME%\bin. Para atualizar a versão, troque HERMES_COMMIT.
+        timeout-minutes: 20
+        shell: pwsh
+        env:
+          HERMES_COMMIT: f0d94882e89ab8d4098b5bb2f166adfb9ee0a0ab
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = Join-Path $env:RUNNER_TEMP 'hermes-installer'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $script = Join-Path $dir 'install.ps1'
+          Invoke-WebRequest -UseBasicParsing `
+            -Uri "https://raw.githubusercontent.com/NousResearch/hermes-agent/$env:HERMES_COMMIT/scripts/install.ps1" `
+            -OutFile $script
+          & $script -Commit $env:HERMES_COMMIT -NonInteractive -SkipBrowser -SkipComputerUse
+          if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "install.ps1 exit code $LASTEXITCODE" }
+
+      - name: Locate Hermes CLI and verify it runs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $home_ = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
+          $bin = Join-Path $home_ 'bin'
+          Write-Host "Hermes home: $home_"
+          if (Test-Path $bin) { Get-ChildItem $bin | Format-Table Name, Length }
+          $exe = $null
+          foreach ($n in 'hermes.exe', 'hermes.cmd', 'hermes.bat') {
+            $p = Join-Path $bin $n
+            if (Test-Path $p) { $exe = $p; break }
+          }
+          if (-not $exe) {
+            $found = Get-ChildItem -Path $home_ -Recurse -Include hermes.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $exe = $found.FullName }
+          }
+          if (-not $exe) { throw "hermes executable not found under $home_" }
+          Write-Host "HERMES_BIN=$exe"
+          Add-Content -Path $env:GITHUB_ENV -Value "HERMES_BIN=$exe"
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path $exe)
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "hermes --version failed ($LASTEXITCODE)" }
+          & $exe serve --help | Select-Object -First 5
+          if ($LASTEXITCODE -ne 0) { throw "hermes serve --help failed ($LASTEXITCODE)" }
+
+      - name: Electron smoke test (real packaged exe + real hermes serve)
+        # Valida inicialização com backend `hermes serve` real (gerenciado pelo app)
+        # + renderer + navegação Chat/Swarm/Automações.
+        # NÃO valida chat ao vivo com provider: não há credenciais/login no CI.
         timeout-minutes: 5
         run: npm run smoke:win
 
