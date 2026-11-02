@@ -33,18 +33,19 @@ import { homedir } from 'node:os'
 import { basename, delimiter, join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { BrowserWindow, dialog } from 'electron'
+import { extraBinDirs, killTree, venvPython } from '../platform'
 import { broadcast, handle } from './index'
 
 const REPO = join(homedir(), 'dev', 'transcriber')
 const SERVER = join(REPO, 'server.py')
-const PYTHON = join(REPO, '.venv', 'bin', 'python')
+const PYTHON = venvPython(join(REPO, '.venv'))
 const HOST = '127.0.0.1'
 const PORT = 7100
 const BASE = `http://${HOST}:${PORT}`
 const HEALTH_TIMEOUT_MS = 60_000
 const LOG_MAX = 400
 // yt-dlp / ffmpeg vêm do Homebrew; app aberto pelo Finder tem PATH mínimo.
-const PATH_EXTRA = ['/opt/homebrew/bin', '/usr/local/bin', join(homedir(), '.local', 'bin')]
+const PATH_EXTRA = extraBinDirs()
 
 export interface ModelState {
   name: string
@@ -94,7 +95,9 @@ function pushLog(chunk: string): void {
 }
 
 function childEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: [...PATH_EXTRA, process.env.PATH ?? ''].join(delimiter) }
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  for (const k of Object.keys(env)) if (k.toUpperCase() === 'PATH') delete env[k] // Windows: "Path"
+  env.PATH = [...PATH_EXTRA, process.env.PATH ?? ''].join(delimiter)
   delete env.ELECTRON_RUN_AS_NODE
   env.PYTHONUNBUFFERED = '1'
   return env
@@ -244,6 +247,7 @@ async function doStart(): Promise<TranscriberStatus> {
     cwd: REPO,
     env: childEnv(),
     detached: false,
+    windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   child = proc
@@ -294,9 +298,9 @@ async function start(): Promise<TranscriberStatus> {
 function killChild(): void {
   const proc = child
   if (!proc || proc.exitCode !== null) return
-  proc.kill('SIGTERM')
+  proc.kill('SIGTERM') // Windows: equivale a terminação forçada
   const t = setTimeout(() => {
-    if (proc.exitCode === null) proc.kill('SIGKILL')
+    if (proc.exitCode === null) killTree(proc, 'SIGKILL')
   }, 3000)
   t.unref()
 }

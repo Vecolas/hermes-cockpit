@@ -44,6 +44,8 @@ interface ApiInit {
 }
 
 const bridge = {
+  /** process.platform do main ('darwin' | 'win32' | 'linux') — o renderer ajusta o chrome da janela */
+  platform: process.platform as string,
   backend: () => ipcRenderer.invoke('hermes:backend'),
   api: (path: string, init?: ApiInit) => ipcRenderer.invoke('hermes:api', path, init),
   ws,

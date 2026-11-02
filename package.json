@@ -13,6 +13,9 @@
     "start": "electron-vite preview",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run build && electron-builder --mac dmg",
+    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "pack:win": "npm run build && electron-builder --win --x64 --dir",
     "swarm:install": "node swarm/install.mjs"
   },
   "build": {
@@ -36,6 +39,24 @@
         "NSMicrophoneUsageDescription": "O Hermes Cockpit usa o microfone para ditado e transcrição local (transcriber).",
         "NSAudioCaptureUsageDescription": "Captura de áudio do sistema para transcrição local."
       }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Hermes-Cockpit-${version}-win-x64-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false
     },
     "dmg": {
       "title": "Hermes Cockpit",

@@ -8,8 +8,9 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { readdir, realpath, stat, statfs } from 'node:fs/promises'
-import { cpus, freemem, homedir, hostname, loadavg, totalmem, uptime } from 'node:os'
+import { cpus, freemem, homedir, hostname, loadavg, release as osRelease, totalmem, uptime } from 'node:os'
 import { basename, delimiter, isAbsolute, join, normalize } from 'node:path'
+import { extraBinDirs, findExecutable, IS_MAC, IS_WIN, isInside } from '../platform'
 import { app, desktopCapturer, screen, shell, systemPreferences } from 'electron'
 import type {
   AppRow,
@@ -36,22 +37,25 @@ import { ensureBackend, hasBackend } from '../backend'
 import { broadcast, handle } from './index'
 
 const HOME = homedir()
-const BIN_DIRS = [join(HOME, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+const BIN_DIRS = IS_WIN ? extraBinDirs() : [...extraBinDirs(), '/usr/bin', '/bin', '/usr/sbin', '/sbin']
+
+/** Features baseadas em ps/lsof/osascript: sem equivalente validado no Windows. */
+function needPosix(feature: string): void {
+  if (IS_WIN) throw new Error(`${feature} indisponível no Windows nesta versão (depende de ps/lsof/osascript do macOS)`)
+}
 const OLLAMA = 'http://127.0.0.1:11434'
 
 function env(): NodeJS.ProcessEnv {
-  const e: NodeJS.ProcessEnv = { ...process.env, PATH: [BIN_DIRS.join(delimiter), process.env.PATH ?? ''].join(delimiter) }
+  const e: NodeJS.ProcessEnv = { ...process.env }
+  for (const k of Object.keys(e)) if (k.toUpperCase() === 'PATH') delete e[k] // Windows: "Path"
+  e.PATH = [BIN_DIRS.join(delimiter), process.env.PATH ?? ''].join(delimiter)
   delete e.ELECTRON_RUN_AS_NODE
   e.LC_ALL = 'C'
   return e
 }
 
 function which(bin: string): string | null {
-  for (const d of BIN_DIRS) {
-    const p = join(d, bin)
-    if (existsSync(p)) return p
-  }
-  return null
+  return findExecutable(bin, BIN_DIRS)
 }
 
 interface RunResult {
@@ -100,6 +104,7 @@ interface PsEntry {
 }
 
 async function psAll(): Promise<PsEntry[]> {
+  needPosix('Processos')
   const r = await run('/bin/ps', ['-axww', '-o', 'pid=,ppid=,uid=,user=,pcpu=,pmem=,rss=,etime=,args='], { timeout: 6000 })
   if (r.failed) throw new Error(r.failed)
   const out: PsEntry[] = []
@@ -242,6 +247,7 @@ async function processes(): Promise<ProcRow[]> {
 // ─── portas ─────────────────────────────────────────────────────────────────
 
 async function ports(): Promise<PortRow[]> {
+  needPosix('Portas')
   const r = await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-FpcLn'], { timeout: 8000 })
   if (r.failed) throw new Error(r.failed)
   if (r.code !== 0 && !r.stdout.trim()) {
@@ -282,6 +288,7 @@ async function ports(): Promise<PortRow[]> {
 // ─── aplicações GUI ─────────────────────────────────────────────────────────
 
 async function apps(): Promise<AppsResult> {
+  if (!IS_MAC) return { apps: [], error: 'lista de aplicações disponível apenas no macOS' }
   const r = await run(
     '/usr/bin/osascript',
     [
@@ -324,6 +331,7 @@ async function apps(): Promise<AppsResult> {
 const APP_NAME_RE = /^[\p{L}\p{N} ._()&+'’-]{1,80}$/u
 
 async function quitApp(nameArg: unknown): Promise<void> {
+  if (!IS_MAC) throw new Error('fechar aplicações disponível apenas no macOS')
   const name = typeof nameArg === 'string' ? nameArg.trim() : ''
   if (!APP_NAME_RE.test(name)) throw new Error(`nome de app inválido: ${String(nameArg).slice(0, 80)}`)
   const mine = new Set([app.getName(), 'Hermes Cockpit', 'Electron'])
@@ -436,9 +444,9 @@ async function repos(opts: unknown): Promise<RepoRow[]> {
 /** Caminho absoluto, normalizado, existente e dentro do HOME. */
 async function safePath(p: unknown): Promise<string> {
   if (typeof p !== 'string' || !p || p.length > 1024 || p.includes('\0')) throw new Error('caminho inválido')
-  const abs = normalize(p.startsWith('~/') ? join(HOME, p.slice(2)) : p)
+  const abs = normalize(/^~[\\/]/.test(p) ? join(HOME, p.slice(2)) : p)
   if (!isAbsolute(abs)) throw new Error(`caminho precisa ser absoluto: ${p}`)
-  if (abs !== HOME && !abs.startsWith(HOME + '/')) throw new Error(`fora do HOME: ${abs}`)
+  if (!isInside(HOME, abs)) throw new Error(`fora do HOME: ${abs}`)
   try {
     await stat(abs)
   } catch {
@@ -495,6 +503,34 @@ async function repoDetail(pathArg: unknown): Promise<RepoDetail> {
 
 const BUNDLE_RE = /\.(app|bundle|framework|plugin|prefpane|pkg|mpkg|workflow|action|saver|kext|appex|qlgenerator|mdimporter)\/?$/i
 
+/** Windows: Explorer / VS Code / Windows Terminal. Sempre execFile, nunca shell com string. */
+async function openTargetWin(kind: OpenTarget['kind'], p: string, isDir: boolean): Promise<RunResult> {
+  if (kind === 'finder') {
+    if (isDir) {
+      const err = await shell.openPath(p) // string vazia = ok
+      return { stdout: '', stderr: err, code: err ? 1 : 0 }
+    }
+    shell.showItemInFolder(p) // revela o arquivo sem executá-lo
+    return { stdout: '', stderr: '', code: 0 }
+  }
+  if (kind === 'vscode') {
+    const local = process.env.LOCALAPPDATA ?? join(HOME, 'AppData', 'Local')
+    const exe = [
+      join(local, 'Programs', 'Microsoft VS Code', 'Code.exe'),
+      join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Microsoft VS Code', 'Code.exe'),
+    ].find((c) => existsSync(c))
+    if (!exe) return { stdout: '', stderr: 'VS Code não encontrado (Code.exe)', code: 1 }
+    return run(exe, [p])
+  }
+  if (kind === 'terminal') {
+    if (!isDir) throw new Error(`terminal só abre diretórios: ${p}`)
+    const wt = await run('wt.exe', ['-d', p])
+    if (!wt.failed && wt.code === 0) return wt
+    return run('cmd.exe', ['/c', 'start', '', '/D', p, 'powershell.exe'])
+  }
+  throw new Error(`tipo de alvo inválido: ${String(kind)}`)
+}
+
 async function openTarget(t: unknown): Promise<void> {
   if (!t || typeof t !== 'object') throw new Error('alvo inválido')
   const { kind, path, url } = t as OpenTarget
@@ -511,12 +547,14 @@ async function openTarget(t: unknown): Promise<void> {
   // realpath: um symlink dentro do HOME não pode apontar para fora nem
   // disfarçar um .app como pasta comum.
   const p = await realpath(await safePath(path))
-  if (p !== HOME && !p.startsWith(HOME + '/')) throw new Error(`fora do HOME: ${p}`)
+  if (!isInside(HOME, p)) throw new Error(`fora do HOME: ${p}`)
   const s = await stat(p)
   // Pastas-pacote (X.app etc.): `open <dir>` EXECUTA o bundle — só revelar.
   const bundle = s.isDirectory() && BUNDLE_RE.test(p)
   let r: RunResult
-  if (kind === 'finder') {
+  if (IS_WIN) {
+    r = await openTargetWin(kind, p, s.isDirectory())
+  } else if (kind === 'finder') {
     r = await run('/usr/bin/open', s.isDirectory() && !bundle ? [p] : ['-R', p])
   } else if (kind === 'vscode') {
     // VS Code abre arquivo ou pasta como texto; nunca executa.
@@ -715,12 +753,13 @@ async function modelPull(nameArg: unknown): Promise<void> {
 // ─── screenshot / sistema ───────────────────────────────────────────────────
 
 async function screenshot(): Promise<Screenshot> {
-  const access = systemPreferences.getMediaAccessStatus('screen')
+  const access = IS_MAC ? systemPreferences.getMediaAccessStatus('screen') : 'granted' // sem permissão de tela fora do macOS
   const d = screen.getPrimaryDisplay()
   const size = { width: Math.round(d.size.width * d.scaleFactor), height: Math.round(d.size.height * d.scaleFactor) }
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size })
   const src = sources.find((s) => s.display_id === String(d.id)) ?? sources[0]
   if (!src || src.thumbnail.isEmpty() || access === 'denied' || access === 'restricted') {
+    if (!IS_MAC) throw new Error('não foi possível capturar a tela')
     throw new Error(
       'sem permissão de Gravação de Tela — habilite o Hermes Cockpit em Ajustes do Sistema › Privacidade e Segurança › Gravação de Tela e reabra o app',
     )
@@ -741,6 +780,7 @@ function cpuTimes(): { idle: number; total: number } {
 
 async function memUsed(): Promise<number> {
   // freemem() no macOS ignora cache/inativa — vm_stat dá a visão do Monitor de Atividade.
+  if (!IS_MAC) return totalmem() - freemem()
   const r = await run('/usr/bin/vm_stat', [], { timeout: 3000 })
   if (r.failed || r.code !== 0) return totalmem() - freemem()
   const page = Number(r.stdout.match(/page size of (\d+)/)?.[1] ?? 16384)
@@ -764,7 +804,7 @@ async function system(): Promise<SystemInfo> {
   } catch {
     /* sem statfs: zeros (UI mostra —) */
   }
-  const sw = await run('/usr/bin/sw_vers', ['-productVersion'], { timeout: 3000 })
+  const sw = IS_MAC ? await run('/usr/bin/sw_vers', ['-productVersion'], { timeout: 3000 }) : { stdout: '' }
   const l = loadavg()
   return {
     cpuPct: Math.round(cpuPct * 10) / 10,
@@ -776,7 +816,7 @@ async function system(): Promise<SystemInfo> {
     diskFree,
     uptimeSec: uptime(),
     hostname: hostname(),
-    osVersion: sw.stdout.trim() ? `macOS ${sw.stdout.trim()}` : process.platform,
+    osVersion: sw.stdout.trim() ? `macOS ${sw.stdout.trim()}` : IS_WIN ? `Windows ${osRelease()}` : process.platform,
   }
 }
 

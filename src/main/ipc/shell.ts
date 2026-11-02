@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { app, ipcMain, type WebContents } from 'electron'
+import { IS_WIN } from '../platform'
 
 // Shell de verdade para o Terminal do dock (o /api/pty do serve só roda
 // `hermes --tui`). Sem dependência nativa: um relay de PTY em Python stdlib
@@ -97,7 +98,7 @@ function python(): string {
 }
 
 function safeCwd(cwd: unknown): string {
-  if (typeof cwd === 'string' && cwd.startsWith('/')) {
+  if (typeof cwd === 'string' && isAbsolute(cwd)) {
     try {
       if (statSync(cwd).isDirectory()) return cwd
     } catch {
@@ -129,6 +130,9 @@ export function stopAllShells(): void {
 export function register(): void {
   ipcMain.handle('ops:shell.open', (e, id: unknown, opts: { cwd?: unknown; cols?: unknown; rows?: unknown; cmd?: unknown } = {}) => {
     if (typeof id !== 'string' || !ID_RE.test(id)) throw new Error('id de shell inválido')
+    // O relay usa pty/fcntl/termios (POSIX). Sem ConPTY/dependência nativa, o
+    // Windows não ganha um terminal falso: a UI mostra este erro no painel.
+    if (IS_WIN) throw new Error('Terminal integrado indisponível no Windows (o relay de PTY é POSIX). Use o Windows Terminal ou PowerShell externos.')
     if (sessions.has(id)) kill(id)
     if (sessions.size >= MAX_SESSIONS) throw new Error(`limite de ${MAX_SESSIONS} shells abertos`)
     const cols = clampDim(opts.cols, 10, 500, 80)

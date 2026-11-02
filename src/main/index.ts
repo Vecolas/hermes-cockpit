@@ -33,8 +33,9 @@ function createWindow(query: Record<string, string> = {}): void {
     minHeight: chat ? 480 : 700,
     backgroundColor: '#0b0d10',
     title: 'Hermes Cockpit',
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: TRAFFIC_LIGHTS,
+    // macOS: barra transparente com traffic lights sobre a topbar do renderer.
+    // Windows/Linux: moldura nativa (controles de janela do sistema).
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: TRAFFIC_LIGHTS } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -73,7 +74,7 @@ function installMenu(): void {
         { label: 'Nova janela de chat', accelerator: 'CmdOrCtrl+Shift+N', click: () => createWindow({ window: 'chat' }) },
         { label: 'Nova janela do cockpit', accelerator: 'CmdOrCtrl+Alt+N', click: () => createWindow() },
         { type: 'separator' },
-        { role: 'close' },
+        ...(process.platform === 'darwin' ? [{ role: 'close' as const }] : [{ role: 'quit' as const }]),
       ],
     },
     { role: 'editMenu' },

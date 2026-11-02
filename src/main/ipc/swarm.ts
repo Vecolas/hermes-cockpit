@@ -15,7 +15,8 @@ import {
   type FSWatcher,
 } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { exeNames, extraBinDirs, IS_MAC, IS_WIN } from '../platform'
+import { delimiter, join } from 'node:path'
 import { broadcast, handle } from './index'
 
 const HOME = homedir()
@@ -26,8 +27,8 @@ const APPROVALS_DIR = join(STATE_DIR, 'approvals')
 const BIN_DIR = join(COCKPIT_DIR, 'swarm-bin')
 const CLI = join(BIN_DIR, 'cli.mjs')
 const PROFILES_DIR = join(HOME, '.hermes', 'profiles')
-const NODE_CANDIDATES = [join(HOME, '.local', 'bin', 'node'), '/opt/homebrew/bin/node', '/usr/local/bin/node']
-const BIN_DIRS = [join(HOME, '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
+const BIN_DIRS = extraBinDirs()
+const NODE_CANDIDATES = BIN_DIRS.flatMap((d) => exeNames('node').map((n) => join(d, n)))
 
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'done' | 'error' | 'cancelled'
 
@@ -195,6 +196,8 @@ function decide(approvalId: string, decision: 'allow' | 'deny', reason?: string,
 /** Pid ainda é o runner desta run? (após crash/reboot o pid pode ter sido reciclado). */
 function isRunnerPid(pid: number, runId: string): boolean {
   if (!pidAlive(pid)) return false
+  // Sem `ps` no Windows: não dá para checar a linha de comando; confia no pid vivo.
+  if (IS_WIN) return true
   try {
     const args = execFileSync('ps', ['-o', 'args=', '-p', String(pid)], { encoding: 'utf8', timeout: 5000 })
     return args.includes('run.mjs') && args.includes(runId)
@@ -228,6 +231,8 @@ function terminalCommand(runId: string, mode: 'watch' | 'resume'): { cwd: string
 }
 
 async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<void> {
+  if (IS_WIN) return openTerminalWin(runId, mode)
+  if (!IS_MAC) throw new Error('abrir terminal externo só é suportado no macOS e no Windows')
   const { cwd, cmd } = terminalCommand(runId, mode)
   const ghostty = ['/Applications/Ghostty.app', join(HOME, 'Applications', 'Ghostty.app')].find((p) => existsSync(p))
   await new Promise<void>((resolve, reject) => {
@@ -238,6 +243,28 @@ async function openTerminal(runId: string, mode: 'watch' | 'resume'): Promise<vo
       const esc = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
       execFile('/usr/bin/osascript', ['-e', `tell application "Terminal" to do script "${esc}"`, '-e', 'tell application "Terminal" to activate'], (e) => done(e))
     }
+  })
+}
+
+/** Windows: janela do PowerShell via `cmd /c start` (não testado em hardware Windows). */
+function openTerminalWin(runId: string, mode: 'watch' | 'resume'): Promise<void> {
+  const file = metaPath(runId)
+  if (!existsSync(file)) return Promise.reject(new Error(`run não encontrada: ${runId}`))
+  const m = readJson<RunMeta>(file)
+  const cwd = m.cwd && existsSync(m.cwd) ? m.cwd : HOME
+  const q = (v: string) => `'${v.replace(/'/g, "''")}'`
+  let ps: string
+  if (mode === 'resume') {
+    if (!TERMINAL.has(m.status)) return Promise.reject(new Error('run ainda ativa — use "assistir"; retomar só depois que terminar'))
+    if (!m.claudeSessionId || !/^[\w-]+$/.test(m.claudeSessionId)) return Promise.reject(new Error('run sem sessão do Claude Code para retomar'))
+    ps = `Set-Location -LiteralPath ${q(cwd)}; claude --resume ${m.claudeSessionId}`
+  } else {
+    ps = `& ${q(nodeBin())} ${q(join(BIN_DIR, 'watch.mjs'))} ${runId}`
+  }
+  return new Promise<void>((resolve, reject) => {
+    execFile('cmd.exe', ['/c', 'start', '', '/D', cwd, 'powershell.exe', '-NoExit', '-Command', ps], { windowsHide: true }, (e) =>
+      e ? reject(new Error(e.message.slice(0, 240))) : resolve(),
+    )
   })
 }
 
@@ -265,7 +292,9 @@ function nodeBin(): string {
 }
 
 function cliEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: [...BIN_DIRS, process.env.PATH ?? ''].join(':') }
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  for (const k of Object.keys(env)) if (k.toUpperCase() === 'PATH') delete env[k] // Windows: "Path"
+  env.PATH = [...BIN_DIRS, process.env.PATH ?? ''].join(delimiter)
   delete env.ELECTRON_RUN_AS_NODE
   return env
 }

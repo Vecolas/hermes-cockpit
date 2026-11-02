@@ -26,6 +26,7 @@ import { existsSync } from 'node:fs'
 import { lstat, readdir, readFile, realpath, stat, unlink } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, sep } from 'node:path'
+import { IS_WIN } from '../platform'
 import { handle } from './index'
 
 const HOME = join(homedir(), '.hermes')
@@ -110,12 +111,30 @@ function run(cmd: string, args: string[], timeoutMs = 60_000): Promise<{ stdout:
   })
 }
 
+async function dirBytes(p: string): Promise<number> {
+  let total = 0
+  let st
+  try {
+    st = await lstat(p)
+  } catch {
+    return 0
+  }
+  if (!st.isDirectory()) return st.size
+  for (const name of await listDir(p)) total += await dirBytes(join(p, name))
+  return total
+}
+
 /** du -sk em lote; caminhos inexistentes são ignorados. du sai ≠0 em permissão negada
  *  parcial, mas ainda imprime o total — aproveitamos o que vier. */
 async function duKb(paths: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>()
   const exist = paths.filter((p) => existsSync(p))
   if (!exist.length) return out
+  if (IS_WIN) {
+    // Sem `du` no Windows: soma recursiva em Node (blocos alocados não disponíveis; usa tamanho lógico).
+    for (const p of exist) out.set(p, Math.ceil((await dirBytes(p)) / 1024))
+    return out
+  }
   const { stdout } = await run('/usr/bin/du', ['-sk', ...exist], 120_000)
   for (const line of stdout.split('\n')) {
     const m = line.match(/^(\d+)\s+(.+)$/)

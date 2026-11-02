@@ -50,6 +50,8 @@ export interface ApiInit {
 }
 
 export interface HermesBridge {
+  /** process.platform do Electron; ausente no modo dev:web */
+  platform?: string
   backend(): Promise<BackendInfo>
   /** REST do serve via proxy no main (token fica no main). */
   api(path: string, init?: ApiInit): Promise<unknown>

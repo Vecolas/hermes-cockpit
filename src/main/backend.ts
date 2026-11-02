@@ -2,24 +2,28 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter } from 'node:path'
+import { extraBinDirs, findExecutable, IS_WIN, killTree, needsShell } from './platform'
 
 // App empacotado aberto pelo Finder tem PATH mínimo (/usr/bin:/bin:...) —
 // resolve o binário do hermes por caminhos conhecidos antes de cair no PATH.
-const HERMES_DIR_CANDIDATES = [join(homedir(), '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin']
+const HERMES_DIR_CANDIDATES = extraBinDirs()
 
 function resolveHermesBin(): string {
   if (process.env.HERMES_BIN && existsSync(process.env.HERMES_BIN)) return process.env.HERMES_BIN
   for (const dir of HERMES_DIR_CANDIDATES) {
-    const candidate = join(dir, 'hermes')
-    if (existsSync(candidate)) return candidate
+    const candidate = findExecutable('hermes', [dir])
+    if (candidate) return candidate
   }
   return 'hermes'
 }
 
 function childEnv(): NodeJS.ProcessEnv {
   const path = [HERMES_DIR_CANDIDATES.join(delimiter), process.env.PATH ?? ''].join(delimiter)
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: path }
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  // Windows: a chave real costuma ser "Path"; PATH duplicado vira ambíguo no filho.
+  for (const k of Object.keys(env)) if (k.toUpperCase() === 'PATH') delete env[k]
+  env.PATH = path
   // Se o app foi lançado de um host Electron (ex.: outro agente), o filho não
   // pode herdar isso — qualquer binário Electron no caminho viraria Node puro.
   delete env.ELECTRON_RUN_AS_NODE
@@ -66,22 +70,10 @@ export function hasBackend(): boolean {
 }
 
 // O serve é spawnado com detached:true → vira líder do próprio grupo de
-// processos. Sinal em -pid alcança o serve e qualquer filho dele (PTYs,
-// shells de ferramenta). Fallback: o próprio filho.
+// processos (POSIX). Sinal em -pid alcança o serve e qualquer filho dele (PTYs,
+// shells de ferramenta). No Windows, killTree usa `taskkill /T /F`.
 function signalChild(child: ChildProcess, sig: NodeJS.Signals): void {
-  const pid = child.pid
-  if (!pid) return
-  try {
-    process.kill(-pid, sig)
-    return
-  } catch {
-    /* grupo já sumiu ou não é líder — tenta o pid direto */
-  }
-  try {
-    child.kill(sig)
-  } catch {
-    /* já morto */
-  }
+  killTree(child, sig)
 }
 
 function isAlive(child: ChildProcess): boolean {
@@ -93,7 +85,8 @@ function start(): Promise<BackendInfo> {
     // O token de sessão é nosso: o serve o aceita via env. Fica só no main —
     // o renderer recebe a info mascarada (ver index.ts).
     const token = randomBytes(24).toString('base64url')
-    const child = spawn(resolveHermesBin(), ['serve', '--host', '127.0.0.1', '--port', '0'], {
+    const bin = resolveHermesBin()
+    const child = spawn(bin, ['serve', '--host', '127.0.0.1', '--port', '0'], {
       env: {
         ...childEnv(),
         HERMES_DASHBOARD_SESSION_TOKEN: token,
@@ -106,7 +99,10 @@ function start(): Promise<BackendInfo> {
       // cwd do serve, então ancora no HOME.
       cwd: homedir(),
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
+      // Windows: detached abriria um console próprio; o grupo POSIX não existe lá.
+      detached: !IS_WIN,
+      windowsHide: true,
+      shell: needsShell(bin),
     })
     children.add(child)
 

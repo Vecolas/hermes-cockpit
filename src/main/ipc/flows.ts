@@ -20,7 +20,7 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { apiFetch } from '../backend'
 import { broadcast, handle } from './index'
 
@@ -95,7 +95,7 @@ function sanitizeFlow(input: unknown, existing?: Flow): Flow {
     const task = str(t?.task, 20_000).trim()
     const cwd = str(t?.cwd, 1024).trim()
     if (!task) throw new Error(`tarefa ${i + 1}: instrução vazia`)
-    if (!cwd || !cwd.startsWith('/')) throw new Error(`tarefa ${i + 1}: cwd precisa ser caminho absoluto`)
+    if (!cwd || !isAbsolute(cwd)) throw new Error(`tarefa ${i + 1}: cwd precisa ser caminho absoluto`)
     const out: FlowTask = { title: str(t?.title, 120).trim() || `Tarefa ${i + 1}`, task, cwd }
     const model = str(t?.model, 120).trim()
     if (model) out.model = model

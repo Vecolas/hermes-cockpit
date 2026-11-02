@@ -72,7 +72,7 @@ export function ChatWindow({ initialBot, session }: { initialBot: string | null;
 
   return (
     <div className="flex h-full flex-col bg-void">
-      <header className="app-drag flex h-11 shrink-0 items-center gap-2 border-b border-edge bg-panel pl-[84px] pr-2">
+      <header className={`app-drag flex h-11 shrink-0 items-center gap-2 border-b border-edge bg-panel pr-2 ${window.hermes?.platform === 'darwin' ? 'pl-[84px]' : 'pl-3'}`}>
         <span className="h-2 w-2 rotate-45 bg-amber" aria-hidden />
         <select
           value={selected}

@@ -635,7 +635,7 @@ function Cockpit({ conn, rpc, connState, theme, setTheme }: CockpitProps) {
       <ErrorBoundary
         label="Topbar"
         compact
-        className={`app-drag h-11 shrink-0 border-b border-edge bg-panel ${window.hermes ? 'pl-[84px]' : ''}`}
+        className={`app-drag h-11 shrink-0 border-b border-edge bg-panel ${window.hermes?.platform === 'darwin' ? 'pl-[84px]' : ''}`}
       >
       <TopBar
         connState={connState}
