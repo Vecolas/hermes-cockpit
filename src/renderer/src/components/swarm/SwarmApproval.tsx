@@ -43,7 +43,7 @@ export function SwarmApprovalCard({
   }
 
   return (
-    <div className="hc-rise rounded-lg border border-dashed border-amber/70 bg-amber/[0.04] px-3.5 py-2.5">
+    <div className="hc-rise hc-breathe rounded-lg border border-dashed border-amber/70 bg-amber/[0.04] px-3.5 py-2.5">
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="font-bold text-amber glow-amber">!</span>
         <span className="shrink-0 text-[12px] text-ink">Aprovação pendente</span>

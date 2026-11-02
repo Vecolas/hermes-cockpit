@@ -13,7 +13,7 @@ import { NotionTasksWidget } from '../components/notion/NotionTasksWidget'
 import type { IconName } from '../components/ui/Icon'
 import { DiffCard } from '../components/devtools/DiffCard'
 import { SwarmCard } from '../components/swarm/SwarmCard'
-import type { UiPrefs, ViewId } from './layout'
+import { flushLayoutStorage, type UiPrefs, type ViewId } from './layout'
 import { getSpace, spaceKey, type Space } from './space'
 
 // Registry de painéis (P1-8). A strip inferior, a área de cards do dock e o
@@ -147,6 +147,7 @@ export function loadRegions(space: Space = getSpace()): RegionLayout {
 export function saveRegions(r: RegionLayout, space: Space = getSpace()): void {
   try {
     localStorage.setItem(spaceKey(KEY, space), JSON.stringify(r))
+    flushLayoutStorage()
   } catch {
     /* sem storage: vale só nesta sessão */
   }
@@ -155,6 +156,7 @@ export function saveRegions(r: RegionLayout, space: Space = getSpace()): void {
 export function resetRegions(space: Space = getSpace()): RegionLayout {
   try {
     localStorage.removeItem(spaceKey(KEY, space))
+    flushLayoutStorage()
   } catch {
     /* ignore */
   }

@@ -47,6 +47,8 @@ const bridge = {
   backend: () => ipcRenderer.invoke('hermes:backend'),
   api: (path: string, init?: ApiInit) => ipcRenderer.invoke('hermes:api', path, init),
   ws,
+  /** pede ao main para gravar o localStorage em disco já (layout/prefs sobrevivem a kill/crash) */
+  flushStorage: (): void => ipcRenderer.send('hermes:flush-storage'),
   /** caminho local de um File (drop/seletor); '' quando não há (ex.: imagem colada) */
   pathForFile: (file: File): string => {
     try {

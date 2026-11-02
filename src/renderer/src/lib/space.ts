@@ -43,6 +43,7 @@ export function setSpace(s: Space): void {
   current = s
   try {
     localStorage.setItem(KEY, s)
+    window.hermes?.flushStorage?.() // espaço ativo sobrevive a kill/crash
   } catch {
     /* sem storage */
   }

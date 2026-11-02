@@ -105,10 +105,10 @@ export function isActive(s: RunStatus): boolean {
 
 export const STATUS_LABEL: Record<RunStatus, string> = {
   queued: 'na fila',
-  running: 'rodando',
-  waiting_approval: 'aguardando aprovação',
+  running: 'executando',
+  waiting_approval: 'aguardando você',
   done: 'concluída',
-  error: 'erro',
+  error: 'falhou',
   cancelled: 'cancelada',
 }
 

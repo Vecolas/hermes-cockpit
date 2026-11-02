@@ -54,6 +54,8 @@ export interface HermesBridge {
   /** REST do serve via proxy no main (token fica no main). */
   api(path: string, init?: ApiInit): Promise<unknown>
   ws: HermesWsBridge
+  /** força o flush do localStorage para o disco (fire-and-forget) */
+  flushStorage?(): void
   /** caminho local de um File (drop/seletor); '' quando indisponível */
   pathForFile?(file: File): string
   /** IPC de domínio: canais `swarm:*`, `ops:*`, `storage:*`, `transcriber:*`. */

@@ -848,3 +848,119 @@ body::before {
     transition: none;
   }
 }
+
+
+/* ─── Fluxo de delegação + masterview (rodada UX swarm) ────────────────────
+   hc-flow-x-amber   conector "aguardando você" (âmbar, mais lento)
+   hc-flow-node-*    anel do nó atual do stepper (live = fósforo, you = âmbar)
+   hc-breathe        borda que respira — SÓ para o que espera o usuário
+   hc-ecg            linha de pulso da ponte (SVG path; data-live liga o traço)
+   hc-sheet-in       entrada de sheet/modal (sobe + escala)
+   hc-num-swap       número/estado que acabou de mudar (key = valor)
+   hc-sweep          varredura única ao entrar algo novo numa coluna
+   Tudo desliga em prefers-reduced-motion (bloco no fim). */
+.hc-flow-x-amber {
+  background-image: repeating-linear-gradient(90deg, var(--color-amber) 0 6px, transparent 6px 12px);
+  background-size: 24px 1px;
+  animation: hc-flow-x 1.8s linear infinite;
+}
+.hc-flow-node-live::after,
+.hc-flow-node-you::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 9999px;
+  border: 1px solid currentColor;
+  opacity: 0;
+  animation: hc-kf-node-ring 1.8s var(--hc-ease-out) infinite;
+}
+.hc-flow-node-live { color: var(--color-phos); }
+.hc-flow-node-you { color: var(--color-amber); }
+.hc-flow-node-you::after { animation-duration: 1.2s; }
+@keyframes hc-kf-node-ring {
+  0% { opacity: 0.7; transform: scale(0.6); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+/* pseudo-elemento: combina com hc-rise/hc-pop (que já usam `animation`) e
+   com overflow-hidden (brilho é interno) */
+@utility hc-breathe {
+  position: relative;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    animation: hc-kf-breathe 2.4s var(--hc-ease-std) infinite;
+  }
+}
+@keyframes hc-kf-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-amber) 0%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-amber) 30%, transparent), inset 0 0 26px -10px color-mix(in srgb, var(--color-amber) 60%, transparent); }
+}
+
+.hc-ecg path {
+  stroke-dasharray: 220 440;
+  stroke-dashoffset: 440;
+}
+.hc-ecg[data-live] path {
+  animation: hc-kf-ecg 2.6s linear infinite;
+}
+@keyframes hc-kf-ecg {
+  to { stroke-dashoffset: -220; }
+}
+
+@utility hc-sheet-in {
+  animation: hc-kf-sheet var(--hc-dur-3) var(--hc-ease-emph) backwards;
+}
+@keyframes hc-kf-sheet {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+}
+
+@utility hc-num-swap {
+  display: inline-block;
+  animation: hc-kf-num-swap var(--hc-dur-3) var(--hc-ease-spring) backwards;
+}
+@keyframes hc-kf-num-swap {
+  from { opacity: 0; transform: translateY(-40%); filter: blur(2px); }
+}
+
+@utility hc-sweep {
+  position: relative;
+  overflow: hidden;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--color-ink) 6%, transparent) 50%, transparent 80%);
+    transform: translateX(-100%);
+    animation: hc-kf-sweep var(--hc-dur-5) var(--hc-ease-out) 1 forwards;
+  }
+}
+@keyframes hc-kf-sweep {
+  to { transform: translateX(100%); }
+}
+
+/* trilho de fundo da masterview: grade técnica muito discreta */
+.hc-grid-bg {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--color-edge) 45%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-edge) 45%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, #000 30%, transparent 85%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-flow-x-amber,
+  .hc-flow-node-live::after,
+  .hc-flow-node-you::after,
+  .hc-breathe::after,
+  .hc-ecg[data-live] path,
+  .hc-sweep::before {
+    animation: none !important;
+  }
+  .hc-ecg path { stroke-dasharray: none; stroke-dashoffset: 0; }
+  .hc-sweep::before { display: none; }
+}

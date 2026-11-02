@@ -21,6 +21,7 @@ import { ConfirmButton, StatusDot } from './ui'
 import { SwarmApprovalCard } from './SwarmApproval'
 import { invoke } from '../../lib/ipc'
 import { requestTerminal } from '../devtools/TerminalTab'
+import { useViewActive } from '../layout/views'
 
 // Árvore ao vivo da delegação: Hermes → bot que pediu → grupo (multi-tarefa)
 // → instâncias do Claude Code (continuações aninhadas sob a run-mãe). Cada nó
@@ -78,7 +79,7 @@ export function SwarmTree({
   if (!lanes.length) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-center text-[12px] text-faint">
-        nenhuma instância ainda — peça a um bot (claude_spawn) ou use “+ Nova tarefa”.
+        nenhuma instância ainda — peça a um bot (claude_spawn) ou use “Delegar tarefa”.
       </div>
     )
   }
@@ -144,7 +145,8 @@ const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMe
   const asks = pendingList.some((a) => a.toolName === 'AskUserQuestion')
   const active = isActive(run.status)
   const now = useNow(1000, active)
-  const ev = useRunEvents(run.id, active)
+  const viewActive = useViewActive()
+  const ev = useRunEvents(run.id, active && viewActive)
   const lines = useMemo(() => termLines(buildItems(ev.lines)), [ev.lines])
   const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -177,7 +179,9 @@ const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMe
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-[11.5px] text-ink hover:text-amber" title={run.task}>
           {run.title}
         </button>
-        <span className={`shrink-0 text-[10px] ${tone.text}`}>{pending ? (asks ? 'pergunta pra você' : `${pending} aprovação`) : STATUS_LABEL[run.status]}</span>
+        <span key={`${run.status}-${pending}`} className={`hc-pop shrink-0 text-[10px] ${pending ? 'text-amber' : tone.text}`}>
+          {pending ? (asks ? 'pergunta pra você' : pending > 1 ? `${pending} aprovações · você` : 'aprovação · você') : STATUS_LABEL[run.status]}
+        </span>
       </div>
 
       {/* terminal ao vivo */}

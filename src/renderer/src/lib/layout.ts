@@ -51,6 +51,24 @@ export function visibleViews(p: Pick<UiPrefs, 'viewOrder' | 'hiddenViews'>): Vie
   return v.length ? v : ['chat']
 }
 
+let flushTimer: ReturnType<typeof setTimeout> | undefined
+/**
+ * O localStorage do Chromium só persiste em disco a cada alguns segundos (ou no
+ * shutdown limpo): um kill/crash logo após mexer no layout perdia a mudança.
+ * Pede ao main (debounce curto) que grave já; no-op no modo navegador.
+ */
+export function flushLayoutStorage(): void {
+  if (flushTimer) clearTimeout(flushTimer)
+  flushTimer = setTimeout(() => {
+    flushTimer = undefined
+    try {
+      window.hermes?.flushStorage?.()
+    } catch {
+      /* sem bridge */
+    }
+  }, 120)
+}
+
 /** Abaixo disso: rail vira overlay, dock vira gaveta, strip rola na horizontal. */
 export const NARROW_PX = 1100
 
@@ -103,6 +121,7 @@ export function loadPrefs(space: Space = getSpace()): UiPrefs {
 export function savePrefs(p: UiPrefs, space: Space = getSpace()): void {
   try {
     localStorage.setItem(spaceKey(PREFS_KEY, space), JSON.stringify(p))
+    flushLayoutStorage()
   } catch {
     /* sem storage */
   }
@@ -120,6 +139,7 @@ export const safeStorage: LayoutStorage = {
   setItem: (k, v) => {
     try {
       localStorage.setItem(k, v)
+      flushLayoutStorage()
     } catch {
       /* ignore */
     }
@@ -134,6 +154,7 @@ export function clearPaneSizes(): void {
       const k = localStorage.key(i)
       if (k && k.startsWith('react-resizable-panels:hc-')) localStorage.removeItem(k)
     }
+    flushLayoutStorage()
   } catch {
     /* ignore */
   }

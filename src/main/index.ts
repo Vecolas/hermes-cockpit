@@ -13,6 +13,15 @@ import { closeAllWs, registerWsProxy } from './wsproxy'
 // renderer deve reservar ~80px à esquerda da topbar para não colidir.
 const TRAFFIC_LIGHTS = { x: 14, y: 15 }
 
+/** Grava no disco o localStorage pendente (prefs/painéis/tamanhos). Nunca lança. */
+function flushRendererStorage(): void {
+  try {
+    session.defaultSession.flushStorageData()
+  } catch {
+    /* app ainda iniciando ou já encerrando */
+  }
+}
+
 function createWindow(query: Record<string, string> = {}): void {
   const chat = query.window === 'chat'
   const win = new BrowserWindow({
@@ -33,6 +42,10 @@ function createWindow(query: Record<string, string> = {}): void {
       sandbox: false,
     },
   })
+
+  // localStorage do Chromium só vai ao disco a cada ~5s ou no shutdown limpo;
+  // fechar a janela é um ponto seguro para forçar o flush do layout salvo.
+  win.on('close', flushRendererStorage)
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
@@ -104,6 +117,7 @@ void app.whenReady().then(() => {
     ws.searchParams.delete('token')
     return { baseUrl: info.baseUrl, wsUrl: ws.toString(), token: '', pid: info.pid }
   })
+  ipcMain.on('hermes:flush-storage', flushRendererStorage)
   ipcMain.handle('hermes:api', (_event, path: string, init?: ApiInit) => apiFetch(path, init ?? {}))
   registerWsProxy()
   setWindowFactory(createWindow)
@@ -146,6 +160,7 @@ function stopDomainChildren(): void {
 }
 
 app.on('before-quit', (event) => {
+  flushRendererStorage()
   if (quitReady) return
   stopDomainChildren()
   closeAllWs()
@@ -164,6 +179,7 @@ app.on('before-quit', (event) => {
 })
 
 app.on('will-quit', () => {
+  flushRendererStorage()
   stopDomainChildren()
   closeAllWs()
   stopBackend()

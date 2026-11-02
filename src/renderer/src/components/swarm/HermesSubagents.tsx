@@ -1,39 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { parseGatewayEvent } from '../../lib/gateway'
+import { useEffect, useRef, useState } from 'react'
+import { SUB_TERMINAL, epochMs, subLabel, subTone, type ActiveSub, type HermesDelegation } from '../../lib/delegation'
 import type { HermesRpc } from '../../lib/rpc'
 import { errMsg, fmtDuration, useNow } from '../../lib/swarm'
 import { toast } from '../../lib/toast'
 import { useViewActive } from '../layout/views'
+import { EmptyState } from '../ui'
 import { Btn, ConfirmButton, SkeletonRows } from './ui'
 
-// Subagents nativos do Hermes (delegate_tool) via RPC do gateway:
-//   delegation.status {}             → árvore viva global do processo serve + pausa/limites
-//   delegation.pause {paused}        → bloqueia/libera NOVOS spawns
-//   subagent.tail/steer/interrupt    → exigem {session_id (runtime, dono), subagent_id}
-//   spawn_tree.list/load             → snapshots salvos (histórico)
-// Eventos `subagent.*` (frame `event` com session_id) dão o session_id dono e
-// atualizam o último tool/texto sem esperar o polling.
-
-interface ActiveSub {
-  subagent_id: string
-  parent_id?: string | null
-  depth?: number | null
-  goal?: string | null
-  model?: string | null
-  started_at?: number | null
-  status?: string | null
-  tool_count?: number | null
-  owner_agent_session_id?: string | null
-  last_tool?: string | null
-  [k: string]: unknown
-}
-
-interface DelegationStatus {
-  active: ActiveSub[]
-  paused: boolean
-  max_spawn_depth: number
-  max_concurrent_children: number
-}
+// Aba "Subagents Hermes": árvore viva + transcript/steer/interrupt do subagent
+// selecionado. O estado (delegation.status + eventos subagent.*) vem de
+// lib/delegation (dono: SwarmView), compartilhado com a masterview.
 
 interface TreeEntry {
   path: string
@@ -44,139 +20,35 @@ interface TreeEntry {
   count?: number
 }
 
-interface LiveInfo {
-  sessionId?: string
-  lastTool?: string
-  lastText?: string
-  status?: string
-  goal?: string
-  at: number
-}
-
-const TERMINAL = new Set(['completed', 'failed', 'error', 'timeout', 'interrupted'])
-
-function statusTone(s?: string | null): string {
-  if (!s || s === 'running') return 'bg-phos'
-  if (s === 'queued') return 'bg-edge2'
-  if (s === 'completed') return 'bg-cyanic'
-  if (s === 'interrupted') return 'bg-faint'
-  return 'bg-alert'
-}
-
-function secs(n?: number | null): number | null {
-  if (n == null) return null
-  return n > 1e12 ? n : n * 1000 // backend usa epoch em segundos
-}
-
-export function HermesSubagents({ rpc }: { rpc: HermesRpc | null }) {
-  const [open, setOpen] = useState(() => Boolean(rpc?.isOpen()))
-  const [st, setSt] = useState<DelegationStatus | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [sel, setSel] = useState<string | null>(null)
-  const live = useRef(new Map<string, LiveInfo>())
-  const [liveTick, setLiveTick] = useState(0)
+export function HermesSubagents({
+  rpc,
+  deleg,
+  sel,
+  onSelect,
+}: {
+  rpc: HermesRpc | null
+  deleg: HermesDelegation
+  sel: string | null
+  onSelect: (id: string | null) => void
+}) {
+  const { status: st, error: err, loading, live, tree } = deleg
   const now = useNow(1000, Boolean(st?.active.length))
-  // view escondida (keep-alive): pausa o polling
-  const viewActive = useViewActive()
+  const selected = st?.active.find((a) => a.subagent_id === sel) ?? null
 
-  // estado de conexão por polling (onState do HermesRpc é único e pertence ao App)
-  useEffect(() => {
-    const iv = setInterval(() => setOpen(Boolean(rpc?.isOpen())), 1000)
-    setOpen(Boolean(rpc?.isOpen()))
-    return () => clearInterval(iv)
-  }, [rpc])
-
-  const load = useCallback(async () => {
-    if (!rpc || !rpc.isOpen()) return
-    try {
-      const r = await rpc.call<DelegationStatus>('delegation.status', {})
-      setSt({
-        active: Array.isArray(r?.active) ? r.active : [],
-        paused: Boolean(r?.paused),
-        max_spawn_depth: r?.max_spawn_depth ?? 0,
-        max_concurrent_children: r?.max_concurrent_children ?? 0,
-      })
-      setErr(null)
-    } catch (e) {
-      setErr(errMsg(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [rpc])
-
-  useEffect(() => {
-    if (!open || !viewActive) return
-    void load()
-    const iv = setInterval(() => void load(), 3000)
-    return () => clearInterval(iv)
-  }, [open, load, viewActive])
-
-  // eventos subagent.* ao vivo
-  useEffect(() => {
-    if (!rpc) return
-    let t: ReturnType<typeof setTimeout> | null = null
-    const off = rpc.subscribe((method, params) => {
-      const ev = parseGatewayEvent(method, params)
-      if (!ev || !ev.type.startsWith('subagent.')) return
-      const p = ev.payload ?? {}
-      const id = typeof p.subagent_id === 'string' ? p.subagent_id : null
-      if (!id) return
-      const prev = live.current.get(id)
-      live.current.set(id, {
-        sessionId: ev.session_id ?? prev?.sessionId,
-        lastTool: typeof p.tool_name === 'string' ? p.tool_name : prev?.lastTool,
-        lastText: typeof p.text === 'string' && p.text.trim() ? p.text : prev?.lastText,
-        status: typeof p.status === 'string' ? p.status : prev?.status,
-        goal: typeof p.goal === 'string' ? p.goal : prev?.goal,
-        at: Date.now(),
-      })
-      setLiveTick((n) => n + 1)
-      if (t) clearTimeout(t)
-      t = setTimeout(() => void load(), 250)
-    })
-    return () => {
-      off()
-      if (t) clearTimeout(t)
-    }
-  }, [rpc, load])
-
-  const active = useMemo(() => st?.active ?? [], [st])
-  const tree = useMemo(() => {
-    const ids = new Set(active.map((a) => a.subagent_id))
-    const kids = new Map<string, ActiveSub[]>()
-    const roots: ActiveSub[] = []
-    for (const a of active) {
-      if (a.parent_id && ids.has(a.parent_id)) {
-        const arr = kids.get(a.parent_id) ?? []
-        arr.push(a)
-        kids.set(a.parent_id, arr)
-      } else roots.push(a)
-    }
-    const flat: { a: ActiveSub; lvl: number }[] = []
-    const walk = (a: ActiveSub, lvl: number) => {
-      flat.push({ a, lvl })
-      for (const c of kids.get(a.subagent_id) ?? []) walk(c, lvl + 1)
-    }
-    roots.forEach((r) => walk(r, 0))
-    return flat
-  }, [active])
-
-  const selected = active.find((a) => a.subagent_id === sel) ?? null
-  void liveTick
-
-  if (!rpc || !open) {
+  if (!rpc || !deleg.online) {
     return (
-      <div className="hc-fade-in p-8 text-[11px] text-dim">
-        <div className="label mb-2">subagents hermes</div>
-        gateway desconectado — a árvore de delegação aparece quando o WS do serve estiver aberto.
-      </div>
+      <EmptyState
+        tone="warn"
+        art="offline"
+        title="subagents hermes · gateway desconectado"
+        detail="A árvore de delegação aparece quando o WebSocket do hermes serve estiver aberto. Nada a fazer aqui — reconecta sozinho."
+      />
     )
   }
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="flex w-[360px] shrink-0 flex-col border-r border-edge">
+      <div className="flex w-[360px] shrink-0 flex-col border-r border-edge bg-panel/30">
         <div className="flex items-center gap-2 border-b border-edge px-4 py-2">
           <span className="label">delegação ao vivo</span>
           {st && (
@@ -191,8 +63,7 @@ export function HermesSubagents({ rpc }: { rpc: HermesRpc | null }) {
               title="bloqueia/libera NOVOS spawns (os ativos continuam)"
               onClick={async () => {
                 try {
-                  const r = await rpc.call<{ paused: boolean }>('delegation.pause', { paused: !st.paused })
-                  setSt({ ...st, paused: Boolean(r?.paused) })
+                  await deleg.setPaused(!st.paused)
                 } catch (e) {
                   toast({ title: 'delegation.pause falhou', detail: errMsg(e), tone: 'error' })
                 }
@@ -206,43 +77,51 @@ export function HermesSubagents({ rpc }: { rpc: HermesRpc | null }) {
           {loading && !st ? (
             <SkeletonRows n={3} className="px-2" />
           ) : err && !st ? (
-            <div className="px-2 text-[11px] text-alert">delegation.status: {err}</div>
+            <EmptyState compact tone="error" title="delegation.status falhou" detail={err} />
           ) : !tree.length ? (
-            <div className="px-2 text-[11px] text-faint">nenhum subagent rodando neste serve</div>
+            <EmptyState
+              compact
+              title="nenhum subagent em campo"
+              detail="Quando um bot usar delegate_tool, cada subagent aparece aqui com o último passo ao vivo."
+            />
           ) : (
-            tree.map(({ a, lvl }) => {
-              const info = live.current.get(a.subagent_id)
-              const status = info?.status ?? a.status ?? 'running'
-              const start = secs(a.started_at)
-              return (
-                <button
-                  key={a.subagent_id}
-                  type="button"
-                  onClick={() => setSel(a.subagent_id)}
-                  style={{ paddingLeft: 8 + lvl * 14 }}
-                  className={`hc-rise mb-0.5 flex w-full min-w-0 flex-col rounded py-1.5 pr-2 text-left transition-colors ${
-                    sel === a.subagent_id ? 'bg-panel2' : 'hover:bg-panel2/60'
-                  }`}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    {lvl > 0 && <span className="text-faint">└</span>}
-                    <span
-                      className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${statusTone(status)} ${
-                        TERMINAL.has(status) ? '' : 'hc-pulse-dot'
-                      }`}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">{a.goal || info?.goal || a.subagent_id}</span>
-                    <span className="shrink-0 text-[10px] text-faint">{start ? fmtDuration(now - start) : ''}</span>
-                  </span>
-                  <span className="ml-3.5 flex min-w-0 gap-2 text-[10px] text-faint">
-                    <span>{status}</span>
-                    {a.model && <span className="truncate">{a.model}</span>}
-                    {a.tool_count != null && <span>{a.tool_count} tools</span>}
-                    {(info?.lastTool ?? a.last_tool) && <span className="truncate text-cyanic/80">→ {info?.lastTool ?? a.last_tool}</span>}
-                  </span>
-                </button>
-              )
-            })
+            <div className="hc-stagger">
+              {tree.map(({ a, lvl }) => {
+                const info = live.get(a.subagent_id)
+                const status = info?.status ?? a.status ?? 'running'
+                const start = epochMs(a.started_at)
+                const on = sel === a.subagent_id
+                return (
+                  <button
+                    key={a.subagent_id}
+                    type="button"
+                    onClick={() => onSelect(a.subagent_id)}
+                    style={{ paddingLeft: 8 + lvl * 14 }}
+                    data-active={on || undefined}
+                    className={`hc-rail-item hc-press mb-0.5 flex w-full min-w-0 flex-col rounded py-1.5 pr-2 text-left ${
+                      on ? 'bg-panel2' : 'hover:bg-panel2/60'
+                    }`}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      {lvl > 0 && <span className="text-faint">└</span>}
+                      <span
+                        className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${subTone(status)} ${
+                          SUB_TERMINAL.has(status) ? '' : 'hc-pulse-dot'
+                        }`}
+                      />
+                      <span className="min-w-0 flex-1 truncate text-[11.5px] text-ink">{a.goal || info?.goal || a.subagent_id}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-faint">{start ? fmtDuration(now - start) : ''}</span>
+                    </span>
+                    <span className="ml-3.5 flex min-w-0 gap-2 text-[10px] text-faint">
+                      <span>{subLabel(status)}</span>
+                      {a.model && <span className="truncate">{a.model}</span>}
+                      {a.tool_count != null && <span>{a.tool_count} tools</span>}
+                      {(info?.lastTool ?? a.last_tool) && <span className="truncate text-cyanic/80">→ {info?.lastTool ?? a.last_tool}</span>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
           )}
           {err && st && <div className="px-2 pt-2 text-[10.5px] text-alert">última atualização falhou: {err}</div>}
         </div>
@@ -254,13 +133,18 @@ export function HermesSubagents({ rpc }: { rpc: HermesRpc | null }) {
             key={selected.subagent_id}
             rpc={rpc}
             sub={selected}
-            sessionId={live.current.get(selected.subagent_id)?.sessionId ?? selected.owner_agent_session_id ?? null}
-            lastText={live.current.get(selected.subagent_id)?.lastText}
+            sessionId={live.get(selected.subagent_id)?.sessionId ?? selected.owner_agent_session_id ?? null}
+            lastText={live.get(selected.subagent_id)?.lastText}
           />
         ) : (
-          <div className="p-8 text-[11px] text-faint">
-            {tree.length ? 'selecione um subagent para ver o transcript ao vivo' : 'quando um bot delegar, a árvore aparece aqui'}
-          </div>
+          <EmptyState
+            title={tree.length ? 'escolha um subagent' : 'nada delegado agora'}
+            detail={
+              tree.length
+                ? 'Selecione à esquerda para ver o transcript ao vivo, direcionar (steer) ou interromper.'
+                : 'Quando um bot delegar, a árvore aparece à esquerda. Histórico de árvores salvas fica no rodapé.'
+            }
+          />
         )}
       </div>
     </div>
@@ -446,7 +330,7 @@ function SpawnTrees({ rpc }: { rpc: HermesRpc }) {
                   <span className="min-w-0 flex-1 truncate">{r.label || r.path.split('/').pop()}</span>
                   <span className="shrink-0 text-[10px] text-faint">{r.count ?? 0}</span>
                   <span className="shrink-0 text-[10px] text-faint">
-                    {r.started_at ? new Date(secs(r.started_at) ?? 0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                    {r.started_at ? new Date(epochMs(r.started_at) ?? 0).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : ''}
                   </span>
                 </button>
                 {detail?.path === r.path && (
