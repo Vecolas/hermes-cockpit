@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react'
 import type { SlashCommand } from '../../lib/gateway'
+import type { HermesRpc } from '../../lib/rpc'
+import { attachErrorText, detachImage, formatSize, kindOf, stageFile, type Attachment } from '../../lib/attachments'
+import { toast } from '../../lib/toast'
 import { useDictation } from '../transcriber/useDictation'
 
 interface Props {
@@ -18,6 +21,9 @@ interface Props {
   onCancel: () => void
   /** texto injetado de fora (prefill de slash); `nonce` muda a cada injeção */
   prefill?: { text: string; nonce: number } | null
+  /** gateway + runtime session_id para stagear anexos; sem eles o botão fica desabilitado */
+  rpc?: HermesRpc | null
+  sessionId?: string | null
 }
 
 const MAX_SUGGESTIONS = 8
@@ -35,12 +41,91 @@ export function Composer({
   onSend,
   onCancel,
   prefill,
+  rpc,
+  sessionId,
 }: Props) {
   const [text, setText] = useState('')
   const [sel, setSel] = useState(0)
   const [dismissed, setDismissed] = useState(false)
   const [sending, setSending] = useState(false)
   const ta = useRef<HTMLTextAreaElement>(null)
+
+  // ── anexos ────────────────────────────────────────────────────────────────
+  const [atts, setAtts] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const attsRef = useRef(atts)
+  attsRef.current = atts
+  const attachSid = useRef(sessionId)
+  const canAttach = Boolean(rpc && sessionId) && !disabled
+
+  const addFiles = useCallback(
+    (files: File[]) => {
+      if (!rpc || !sessionId || files.length === 0) return
+      const sid = sessionId
+      for (const file of files) {
+        const kind = kindOf(file)
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+        const name = file.name || (kind === 'image' ? 'imagem-colada.png' : 'arquivo')
+        setAtts((a) => [...a, { id, name, kind, size: file.size, status: 'staging' }])
+        stageFile(rpc, sid, file, kind).then(
+          (staged) => {
+            if (attachSid.current !== sid) {
+              if (staged.stagedPath) detachImage(rpc, sid, staged.stagedPath)
+              return
+            }
+            setAtts((a) => a.map((x) => (x.id === id ? { ...x, ...staged, status: 'ready' } : x)))
+          },
+          (e) => {
+            const error = attachErrorText(e)
+            setAtts((a) => a.map((x) => (x.id === id ? { ...x, status: 'error', error } : x)))
+            toast({ title: `Falha ao anexar ${name}`, detail: error, tone: 'error' })
+          },
+        )
+      }
+    },
+    [rpc, sessionId],
+  )
+
+  const removeAtt = (a: Attachment) => {
+    setAtts((list) => list.filter((x) => x.id !== a.id))
+    if (rpc && sessionId && a.stagedPath) detachImage(rpc, sessionId, a.stagedPath)
+  }
+
+  // troca de sessão: o que estava staged pertencia à anterior — solta e limpa
+  useEffect(() => {
+    const prev = attachSid.current
+    attachSid.current = sessionId
+    if (prev && prev !== sessionId) {
+      if (rpc) for (const a of attsRef.current) if (a.stagedPath) detachImage(rpc, prev, a.stagedPath)
+      setAtts([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId])
+
+  const onDragOver = (e: DragEvent) => {
+    if (!canAttach || !Array.from(e.dataTransfer.types).includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setDragging(true)
+  }
+  const onDrop = (e: DragEvent) => {
+    setDragging(false)
+    if (!canAttach || e.dataTransfer.files.length === 0) return
+    e.preventDefault()
+    addFiles(Array.from(e.dataTransfer.files))
+  }
+  const onPaste = (e: ClipboardEvent) => {
+    if (!canAttach) return
+    const files = Array.from(e.clipboardData.files)
+    if (files.length === 0) return
+    e.preventDefault()
+    addFiles(files)
+  }
+
+  const staging = atts.some((a) => a.status === 'staging')
+  const ready = atts.filter((a) => a.status === 'ready')
+  const hasContent = Boolean(text.trim()) || ready.length > 0
 
   // ── ditado (contrato fixo de useDictation; oculto se available=false) ─────
   const dictation = useDictation()
@@ -113,13 +198,21 @@ export function Composer({
   }
 
   const send = async () => {
-    const value = text.trim()
-    if (!value || disabled || sending) return
+    const typed = text.trim()
+    if (!hasContent || disabled || sending || staging) return
     if (listening) dictation.stop()
+    const refs = ready.map((a) => a.refText).filter(Boolean) as string[]
+    const images = ready.filter((a) => a.kind === 'image')
+    // sem texto: convenção do backend para imagens; arquivos vão só pela referência @file:
+    const base = typed || (refs.length === 0 && images.length > 0 ? `[User attached image: ${images.map((a) => a.name).join(', ')}]` : '')
+    const value = [base, ...refs].filter(Boolean).join('\n')
     setSending(true)
     try {
       const ok = await onSend(value)
-      if (ok) setText('')
+      if (ok) {
+        setText('')
+        setAtts((list) => list.filter((a) => a.status === 'staging' || a.status === 'error').filter((a) => !ready.includes(a)))
+      }
     } finally {
       setSending(false)
       ta.current?.focus()
@@ -161,7 +254,12 @@ export function Composer({
 
   return (
     <div className="border-t border-edge px-5 py-3">
-      <div className="relative mx-auto max-w-[880px] rounded-xl border border-edge bg-panel px-3.5 pb-2 pt-2 shadow-[var(--hc-shadow-1)] transition-[border-color,box-shadow] duration-150 focus-within:border-amber/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-amber)_10%,transparent)]">
+      <div
+        onDragOver={onDragOver}
+        onDragLeave={() => setDragging(false)}
+        onDrop={onDrop}
+        className={`relative mx-auto max-w-[880px] rounded-xl border border-edge bg-panel px-3.5 pb-2 pt-2 shadow-[var(--hc-shadow-1)] transition-[border-color,box-shadow] duration-150 focus-within:border-amber/50 focus-within:shadow-[0_0_0_3px_color-mix(in_srgb,var(--color-amber)_10%,transparent)] ${dragging ? 'border-amber/70 bg-amber/5' : ''}`}
+      >
         {showSuggest && (
           <ul className="absolute bottom-full left-0 right-0 mb-1 max-h-72 overflow-y-auto rounded-md border border-edge2 bg-panel2 py-1 shadow-xl">
             {suggestions.map((c, i) => (
@@ -191,9 +289,37 @@ export function Composer({
           disabled={disabled}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={disabled ? (disabledReason ?? 'indisponível') : `Fala com o ${title}...`}
           className="block w-full resize-none bg-transparent leading-relaxed text-ink placeholder:text-faint focus:outline-none disabled:cursor-not-allowed"
         />
+        {atts.length > 0 && (
+          <ul className="mt-1.5 flex flex-wrap gap-1.5" aria-label="anexos">
+            {atts.map((a) => (
+              <li
+                key={a.id}
+                title={a.error ?? a.name}
+                className={`hc-fade-in flex max-w-[260px] items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px] ${
+                  a.status === 'error' ? 'border-alert/50 text-alert' : 'border-edge2 bg-panel2 text-dim'
+                }`}
+              >
+                <span className="font-mono text-[9px] uppercase tracking-wide text-faint">{a.kind === 'image' ? 'img' : a.kind}</span>
+                <span className="truncate text-ink">{a.name}</span>
+                <span className="shrink-0 text-faint">
+                  {a.status === 'staging' ? 'enviando…' : a.status === 'error' ? 'falhou' : formatSize(a.size)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeAtt(a)}
+                  aria-label={`remover ${a.name}`}
+                  className="shrink-0 text-faint hover:text-alert"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         {listening && (
           <div className="hc-fade-in mt-0.5 flex min-h-[1.4em] items-baseline gap-2 text-dim">
             <span className="hc-pulse-dot inline-block h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full bg-alert" />
@@ -205,10 +331,22 @@ export function Composer({
           </div>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              addFiles(Array.from(e.target.files ?? []))
+              e.target.value = ''
+            }}
+          />
           <button
-            disabled
-            title="Anexos ainda não suportados no cockpit"
-            className="cursor-not-allowed rounded border border-edge px-2 py-0.5 text-[11px] text-faint/60"
+            type="button"
+            disabled={!canAttach}
+            onClick={() => fileInput.current?.click()}
+            title={canAttach ? 'Anexar arquivo, imagem ou PDF (ou arraste / cole)' : 'Anexos indisponíveis sem sessão ativa'}
+            className="rounded border border-edge px-2 py-0.5 text-[11px] text-dim hover:border-amber/50 hover:text-ink disabled:cursor-not-allowed disabled:text-faint/60 disabled:hover:border-edge"
           >
             + arquivo
           </button>
@@ -272,7 +410,7 @@ export function Composer({
             ) : (
               <button
                 onClick={() => void send()}
-                disabled={disabled || sending || !text.trim()}
+                disabled={disabled || sending || staging || !hasContent}
                 className="rounded bg-amber px-2.5 py-0.5 text-[11px] font-semibold text-void hover:brightness-110 disabled:opacity-30"
               >
                 enviar ⏎

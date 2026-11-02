@@ -1042,6 +1042,8 @@ export function ChatPane({ rpc, bot, connState }: Props) {
         commands={commands}
         quick={quick}
         prefill={prefill}
+        rpc={rpc}
+        sessionId={sid}
         onSend={onSend}
         onCancel={onCancel}
         footerLeft={

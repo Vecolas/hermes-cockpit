@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
 // Espelho dos tipos de src/main/wsproxy.ts e src/renderer/src/env.d.ts —
 // o preload é empacotado à parte e não importa do main nem do renderer.
@@ -47,6 +47,14 @@ const bridge = {
   backend: () => ipcRenderer.invoke('hermes:backend'),
   api: (path: string, init?: ApiInit) => ipcRenderer.invoke('hermes:api', path, init),
   ws,
+  /** caminho local de um File (drop/seletor); '' quando não há (ex.: imagem colada) */
+  pathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file) || ''
+    } catch {
+      return ''
+    }
+  },
   invoke: (channel: string, ...args: unknown[]): Promise<unknown> => {
     if (!DOMAIN_RE.test(channel)) return Promise.reject(new Error(`canal IPC não permitido: ${channel}`))
     return ipcRenderer.invoke(channel, ...args)
