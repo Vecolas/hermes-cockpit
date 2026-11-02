@@ -16,6 +16,7 @@
     "dist:mac": "npm run build && electron-builder --mac dmg",
     "dist:win": "npm run build && electron-builder --win nsis --x64",
     "pack:win": "npm run build && electron-builder --win --x64 --dir",
+    "smoke:win": "node scripts/smoke-electron.mjs \"release/win-unpacked/Hermes Cockpit.exe\" --out smoke-out",
     "swarm:install": "node swarm/install.mjs"
   },
   "build": {

@@ -1,0 +1,88 @@
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/windows.yml'
+      - 'src/**'
+      - 'build/**'
+      - 'scripts/smoke-electron.mjs'
+      - 'electron.vite.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build renderer/main
+        run: npm run build
+
+      - name: Build unpacked Windows x64 app
+        run: npx electron-builder --win --x64 --dir
+
+      - name: Electron smoke test (real packaged exe)
+        # Valida inicialização + renderer + navegação Chat/Swarm/Automações.
+        # NÃO valida integração viva com Hermes (sem backend/credenciais no CI).
+        timeout-minutes: 5
+        run: npm run smoke:win
+
+      - name: Upload smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-diagnostics
+          path: smoke-out/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Build NSIS installer
+        run: npm run dist:win
+
+      - name: Verify installer
+        shell: bash
+        run: |
+          ls -la release
+          exe=$(ls release/*-setup.exe 2>/dev/null | head -n1)
+          if [ -z "$exe" ]; then echo "::error::NSIS installer not found"; exit 1; fi
+          size=$(stat -c%s "$exe")
+          echo "Installer: $exe ($size bytes)"
+          if [ "$size" -lt 50000000 ]; then echo "::error::Installer suspiciously small ($size bytes; expected >50MB for Electron)"; exit 1; fi
+          ls release/latest*.yml >/dev/null
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-cockpit-windows-x64
+          path: |
+            release/*-setup.exe
+            release/*-setup.exe.blockmap
+            release/latest*.yml
+          retention-days: 7
+          if-no-files-found: error
