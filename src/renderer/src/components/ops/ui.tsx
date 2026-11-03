@@ -247,16 +247,29 @@ export function SkeletonRows({ rows = 6, cols = 4 }: { rows?: number; cols?: num
   )
 }
 
+/**
+ * Fonte que não existe nesta plataforma (ex.: lsof/ps/osascript no Windows).
+ * O main sinaliza pelo prefixo da mensagem — ver needPosix() em
+ * src/main/ipc/ops.ts — e aqui isso vira estado neutro, não alerta vermelho:
+ * feature indisponível não é falha.
+ */
+export const isUnavailable = (error: string | null | undefined): boolean => /^indispon[íi]vel\b/i.test(error?.trim() ?? '')
+
 export function ErrorState({ error, onRetry, hint }: { error: string; onRetry?: () => void; hint?: ReactNode }) {
+  const off = isUnavailable(error)
   return (
-    <div className="hc-fade-in m-4 rounded-md border border-alert/30 bg-alert/5 px-3 py-2.5 text-[11.5px]">
+    <div
+      className={`hc-fade-in m-4 rounded-md border px-3 py-2.5 text-[11.5px] ${
+        off ? 'border-edge2 bg-panel2/40' : 'border-alert/30 bg-alert/5'
+      }`}
+    >
       <div className="flex items-start gap-2">
-        <span className="text-alert">●</span>
+        <span className={off ? 'text-faint' : 'text-alert'}>●</span>
         <div className="min-w-0 flex-1">
-          <div className="break-words text-ink">{error}</div>
+          <div className={`break-words ${off ? 'text-dim' : 'text-ink'}`}>{error}</div>
           {hint && <div className="mt-1 text-faint">{hint}</div>}
         </div>
-        {onRetry && (
+        {onRetry && !off && (
           <Btn onClick={onRetry} tone="alert">
             tentar de novo
           </Btn>
@@ -284,15 +297,27 @@ export function Th({ children, className = '', onClick, active }: { children?: R
   )
 }
 
-export function Meter({ pct, tone = 'amber' }: { pct: number; tone?: 'amber' | 'phos' | 'cyanic' | 'alert' }) {
-  const v = Math.max(0, Math.min(100, pct))
-  const bg = tone === 'phos' ? 'bg-phos' : tone === 'cyanic' ? 'bg-cyanic' : tone === 'alert' ? 'bg-alert' : 'bg-amber'
+export type MeterTone = 'amber' | 'phos' | 'cyanic' | 'alert' | 'warn'
+
+const METER_BG: Record<MeterTone, string> = {
+  amber: 'bg-amber',
+  phos: 'bg-phos',
+  cyanic: 'bg-cyanic',
+  alert: 'bg-alert',
+  warn: 'bg-warn',
+}
+
+export function Meter({ pct, tone = 'amber', className = '' }: { pct: number; tone?: MeterTone; className?: string }) {
+  const v = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0))
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-edge">
-      <div className={`h-full rounded-full ${bg} transition-[width] duration-300`} style={{ width: `${v}%` }} />
+    <div className={`h-1.5 w-full overflow-hidden rounded-full bg-edge ${className}`}>
+      <div className={`h-full rounded-full ${METER_BG[tone]} transition-[width] duration-300`} style={{ width: `${v}%` }} />
     </div>
   )
 }
+
+/** Tom de uso: ≥90% alerta, ≥80% aviso, resto fósforo (tokens do tema). */
+export const usageTone = (pct: number): MeterTone => (pct >= 90 ? 'alert' : pct >= 80 ? 'warn' : 'phos')
 
 export function useLocal<T extends string>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {

@@ -14,6 +14,7 @@ import type { IconName } from '../components/ui/Icon'
 import { DiffCard } from '../components/devtools/DiffCard'
 import { SwarmCard } from '../components/swarm/SwarmCard'
 import { flushLayoutStorage, type UiPrefs, type ViewId } from './layout'
+import { HOST_LABEL } from './platform'
 import { getSpace, spaceKey, type Space } from './space'
 
 // Registry de painéis (P1-8). A strip inferior, a área de cards do dock e o
@@ -85,7 +86,7 @@ export const PANELS: PanelDef[] = [
   },
   { id: 'cota-gauges', titulo: 'Cota · gauges', componente: QuotaGaugesWidget, fonte: ['/quota'], refreshMs: 60_000, icon: 'gauge', descricao: 'orçamento e janelas de cada provedor' },
   { id: 'quota', titulo: 'Provedores · cota', componente: QuotaWidget, fonte: ['/quota'], refreshMs: 60_000, icon: 'money', descricao: 'gasto do mês e barras por provedor' },
-  { id: 'sistema', titulo: 'Sistema · Mac', componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000, icon: 'cpu', descricao: 'CPU, RAM, disco, gateway e ollama' },
+  { id: 'sistema', titulo: `Sistema · ${HOST_LABEL}`, componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000, icon: 'cpu', descricao: 'CPU, RAM, disco, gateway e ollama (host do agente)' },
   {
     id: 'cota-rail',
     titulo: 'Provedores · cota (compacto)',

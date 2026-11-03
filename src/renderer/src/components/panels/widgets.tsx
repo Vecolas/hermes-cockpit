@@ -1,4 +1,5 @@
 import { agendaPath, inSpace, spaceOfAccount, useSpace, type Space } from '../../lib/space'
+import { HOST_LABEL } from '../../lib/platform'
 import { SkeletonLines } from '../ui/Skeleton'
 import { Bar, PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
@@ -422,13 +423,13 @@ function i2tone(nome?: string): 'amber' | 'phos' | 'cyanic' {
   return TONES[h % TONES.length]
 }
 
-// ─── Sistema (Mac) ───────────────────────────────────────────────────────────
+// ─── Sistema (host do agente) ───────────────────────────────────────────────
 export function SistemaWidget({ refreshMs }: WidgetProps) {
   const sys = usePluginSource<Sistema>(API.sistema, refreshMs)
   const s = sys.data
   return (
     <PanelFrame
-      titulo="Sistema · Mac"
+      titulo={`Sistema · ${HOST_LABEL}`}
       fonte="psutil"
       error={sys.error}
       loading={sys.loading}

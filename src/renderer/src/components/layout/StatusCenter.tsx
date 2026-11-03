@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { setAutoMode, useAutoMode } from '../../lib/automode'
 import type { ConnState } from '../../lib/rpc'
+import { HOST_LABEL } from '../../lib/platform'
 import { Bar } from '../panels/PanelFrame'
 import { usePluginSource } from '../panels/source'
 import { API, fmtReset, quotaWindows, worstWindow, type Quota, type Sistema } from '../panels/types'
@@ -29,7 +30,7 @@ interface Row {
 
 /**
  * "Status center" da topbar: um único botão com o pior estado agregado
- * (serve local, Mac executor, Telegram, cota) + gasto do mês; o popover
+ * (serve local, host executor, Telegram, cota) + gasto do mês; o popover
  * detalha cada fonte e traz o auto mode. Fonte que falha = linha de erro.
  */
 export function StatusCenter({ connState }: { connState: ConnState }) {
@@ -65,7 +66,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
   const mac: Row = {
     id: 'mac',
     icon: 'cpu',
-    label: 'Mac executor',
+    label: `${HOST_LABEL} executor`,
     ...(sistema.error
       ? { tone: 'bad' as Tone, value: 'erro', detail: `/sistema: ${sistema.error}` }
       : !s
@@ -76,7 +77,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
               value: `CPU ${pct(s.cpu_percent)} · RAM ${pct(s.mem_percent)}`,
               detail: `gateway ${s.gateway.code_version ?? ''} pid ${s.gateway.pid ?? '?'}`,
             }
-          : { tone: 'warn' as Tone, value: 'sem gateway', detail: 'Mac respondendo, mas sem estado do gateway (gateway_state.json)' }),
+          : { tone: 'warn' as Tone, value: 'sem gateway', detail: `${HOST_LABEL} respondendo, mas sem estado do gateway (gateway_state.json)` }),
   }
   const tg: Row = {
     id: 'tg',

@@ -26,7 +26,7 @@ import { useViewActive } from '../layout/views'
 // Árvore ao vivo da delegação: Hermes → bot que pediu → grupo (multi-tarefa)
 // → instâncias do Claude Code (continuações aninhadas sob a run-mãe). Cada nó
 // é um "terminal" com o log ao vivo; conectores animados enquanto há trabalho.
-// Botões abrem a instância num terminal de verdade do Mac (assistir / retomar).
+// Botões abrem a instância num terminal de verdade do sistema (assistir / retomar).
 
 const MAX_FINISHED = 12
 
@@ -218,7 +218,7 @@ const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMe
           <MiniBtn onClick={() => openHere(run, active ? 'watch' : 'resume')} title={active ? 'seguir ao vivo no terminal do app (dock)' : 'claude --resume interativo no terminal do app (dock)'}>
             ▣ abrir aqui
           </MiniBtn>
-          <MiniBtn onClick={() => void open('watch')} title="abrir num terminal real do Mac seguindo ao vivo">
+          <MiniBtn onClick={() => void open('watch')} title="abrir num terminal de verdade do sistema seguindo ao vivo">
             ⧉ assistir
           </MiniBtn>
           {!active && run.claudeSessionId && (

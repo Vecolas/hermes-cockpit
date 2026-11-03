@@ -139,17 +139,71 @@ export interface PullProgress {
   error?: string
 }
 
-export interface SystemInfo {
-  cpuPct: number
+// ─── sistema (espelho de src/main/metrics.ts) ───────────────────────────────
+
+export interface CpuInfo {
+  /** modelo do processador (sysctl no macOS, os.cpus() nos demais) */
+  model: string
   cores: number
-  load: [number, number, number]
-  memTotal: number
-  memUsed: number
-  diskTotal: number
-  diskFree: number
-  uptimeSec: number
+  /** uso total, 0–100 (diferença entre duas leituras de os.cpus()) */
+  pct: number
+  /** uso por núcleo, mesma janela de amostragem */
+  perCore: number[]
+  speedMhz?: number
+  /** janela real da amostragem, em ms */
+  sampleMs?: number
+}
+
+export interface MemInfo {
+  total: number
+  used: number
+  free: number
+  pct: number
+  /** 'vm_stat' | '/proc/meminfo' | 'os.freemem' — de onde veio o "usado" */
+  source: string
+}
+
+export interface VolumeInfo {
+  /** 'C:' no Windows, ponto de montagem no POSIX */
+  id: string
+  label?: string
+  fs?: string
+  total: number
+  used: number
+  free: number
+  pct: number
+}
+
+export interface GpuInfo {
+  name: string
+  /** uso 0–100; ausente quando a plataforma não expõe de forma barata */
+  pct?: number
+  vramUsed?: number
+  vramTotal?: number
+  /** 'nvidia-smi' | 'GPU Engine (engtype_3D)' | 'Win32_VideoController' | 'sysctl' */
+  source: string
+}
+
+export interface SystemInfo {
+  platform: string
   hostname: string
+  /** ex.: 'Windows 11 Pro 26200', 'macOS 15.1' */
   osVersion: string
+  osDetail?: string
+  uptimeSec: number
+  /** null no Windows (não existe load average) */
+  load: [number, number, number] | null
+  cpu: CpuInfo
+  mem: MemInfo
+  volumes: VolumeInfo[]
+  /** motivo de a lista estar incompleta (fallback para o volume do HOME) */
+  volumesError?: string
+  /** id do volume do sistema ('C:' / '/') */
+  primaryVolume?: string
+  gpus: GpuInfo[]
+  /** uso 3D somado, quando há vários adaptadores e não dá para atribuir */
+  gpu3dPct?: number
+  gpuError?: string
 }
 
 // ─── wrappers ───────────────────────────────────────────────────────────────
