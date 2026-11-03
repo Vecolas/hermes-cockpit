@@ -138,3 +138,10 @@ export const API = {
   quota: '/api/plugins/cockpit/quota',
   inbox: '/api/plugins/cockpit/inbox',
 } as const
+
+/** Tokens compactos: 999, 12k, 2.5M. */
+export function fmtTokens(n: number): string {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`
+  return String(n)
+}

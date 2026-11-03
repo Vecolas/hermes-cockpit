@@ -4,13 +4,13 @@ import { api } from '../../lib/ipc'
 import { agendaPath, inSpace, spaceOfAccount, spaceOfBot, spaceOfPath, useSpace, type ItemSpace } from '../../lib/space'
 import { useQuota } from '../../lib/quota'
 import { fmtResetParts, pctTone, TONE_VAR } from '../../lib/quota-model'
-import { fmtCost, useNow, useSwarm, type RunMeta } from '../../lib/swarm'
+import { useNow, useSwarm, type RunMeta } from '../../lib/swarm'
 import { cx } from '../ui/cx'
 import { CountUp, Gauge, Sparkline } from '../ui/Viz'
 import { PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import { agendaFonte, agendaPartialError, type WidgetProps } from './widgets'
-import { API, CALENDAR_COLORS, calendarColor, type Agenda, type AgendaEvent, type CronJob } from './types'
+import { API, CALENDAR_COLORS, calendarColor, fmtTokens, type Agenda, type AgendaEvent, type CronJob } from './types'
 
 // Widgets v3 do registry: agenda da semana multi-conta, próximos crons,
 // atividade do swarm e gauges de cota. Todos filtram pelo espaço ativo e
