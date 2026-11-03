@@ -2,8 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { setAutoMode, useAutoMode } from '../../lib/automode'
 import { useQuota } from '../../lib/quota'
 import { fmtResetParts, pctTone, snapshotWorstPct, TONE_VAR } from '../../lib/quota-model'
+import { fmtUptime, ops, type SystemInfo } from '../../lib/ops'
 import type { ConnState } from '../../lib/rpc'
 import { HOST_LABEL } from '../../lib/platform'
+import { useAsync } from '../ops/ui'
 import { Bar } from '../panels/PanelFrame'
 import { usePluginSource } from '../panels/source'
 import { API, type Sistema } from '../panels/types'
@@ -36,7 +38,11 @@ interface Row {
  * detalha cada fonte e traz o auto mode. Fonte que falha = linha de erro.
  */
 export function StatusCenter({ connState }: { connState: ConnState }) {
-  const sistema = usePluginSource<Sistema>(API.sistema, 30_000)
+  // Métricas do host: coleta local do main (multiplataforma). O plugin cockpit
+  // (/sistema) é opcional e só acrescenta o estado do gateway — 404 dele não
+  // vira erro nesta linha.
+  const sys = useAsync<SystemInfo>(ops.system, [], 30_000)
+  const plugin = usePluginSource<Sistema>(API.sistema, 60_000)
   const quota = useQuota(60_000)
   const auto = useAutoMode()
   const [open, setOpen] = useState(false)
@@ -64,22 +70,31 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
         ? { tone: 'warn' as Tone, value: 'conectando', detail: 'conectando ao hermes serve…' }
         : { tone: 'bad' as Tone, value: connState, detail: `WebSocket ${connState} — reconectando com backoff` }),
   }
-  const s = sistema.data
+  const s = sys.data
+  const gw = plugin.error ? null : plugin.data?.gateway
+  // Tom da linha segue o que ela MOSTRA (CPU/RAM). Volume quase cheio não é
+  // carga do momento: entra no detalhe, não deixa o ponto vermelho para sempre.
+  const worstUse = s ? Math.max(s.cpu.pct, s.mem.pct) : -1
+  const fullVol = s ? [...s.volumes].sort((a, b) => b.pct - a.pct)[0] : undefined
   const mac: Row = {
     id: 'mac',
     icon: 'cpu',
     label: `${HOST_LABEL} executor`,
-    ...(sistema.error
-      ? { tone: 'bad' as Tone, value: 'erro', detail: `/sistema: ${sistema.error}` }
-      : !s
-        ? { tone: 'off' as Tone, value: '…', detail: 'aguardando /sistema' }
-        : s.gateway
-          ? {
-              tone: 'ok' as Tone,
-              value: `CPU ${pct(s.cpu_percent)} · RAM ${pct(s.mem_percent)}`,
-              detail: `gateway ${s.gateway.code_version ?? ''} pid ${s.gateway.pid ?? '?'}`,
-            }
-          : { tone: 'warn' as Tone, value: 'sem gateway', detail: `${HOST_LABEL} respondendo, mas sem estado do gateway (gateway_state.json)` }),
+    ...(!s
+      ? sys.error
+        ? { tone: 'bad' as Tone, value: 'erro', detail: `ops:system: ${sys.error}` }
+        : { tone: 'off' as Tone, value: '…', detail: 'coletando métricas do host' }
+      : {
+          tone: (worstUse >= 90 ? 'bad' : worstUse >= 80 ? 'warn' : 'ok') as Tone,
+          value: `CPU ${pct(s.cpu.pct)} · RAM ${pct(s.mem.pct)}`,
+          detail: [
+            `${s.hostname} · ${s.osVersion} · no ar há ${fmtUptime(s.uptimeSec)}`,
+            fullVol && fullVol.pct >= 90 ? `${fullVol.id} em ${Math.round(fullVol.pct)}%` : null,
+            gw ? `gateway ${gw.code_version ?? 'on'} pid ${gw.pid ?? '?'}` : null,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+        }),
   }
   const tg: Row = {
     id: 'tg',

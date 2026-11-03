@@ -93,7 +93,17 @@ export const PANELS: PanelDef[] = [
     icon: 'money',
     descricao: 'uma aba por provedor, com a janela de 5h e a semanal',
   },
-  { id: 'sistema', titulo: `Sistema · ${HOST_LABEL}`, componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000, icon: 'cpu', descricao: 'CPU, RAM, disco, gateway e ollama (host do agente)' },
+  {
+    id: 'sistema',
+    titulo: `Sistema · ${HOST_LABEL}`,
+    componente: SistemaWidget,
+    // ops:system é a fonte real (coleta local do main, multiplataforma);
+    // /sistema é extra e opcional (gateway/ollama do plugin cockpit).
+    fonte: ['ops:system', '/sistema'],
+    refreshMs: 15_000,
+    icon: 'cpu',
+    descricao: 'CPU, RAM, volumes, GPU e uptime desta máquina (coleta local)',
+  },
   {
     id: 'cota-rail',
     titulo: 'Provedores · cota (compacto)',

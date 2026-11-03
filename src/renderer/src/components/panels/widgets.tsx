@@ -1,7 +1,9 @@
-import { agendaPath, inSpace, spaceOfAccount, useSpace, type Space } from '../../lib/space'
+import { fmtBytes, fmtUptime, ops, type SystemInfo } from '../../lib/ops'
 import { HOST_LABEL } from '../../lib/platform'
+import { agendaPath, inSpace, spaceOfAccount, useSpace, type Space } from '../../lib/space'
+import { Meter, useAsync, usageTone } from '../ops/ui'
 import { SkeletonLines } from '../ui/Skeleton'
-import { Bar, PanelFrame } from './PanelFrame'
+import { PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import {
   API,
@@ -16,8 +18,9 @@ import {
   type Sistema,
 } from './types'
 
-// Widgets do plugin cockpit. Cada um lê a própria fonte (polling compartilhado
-// em source.tsx) e mostra erro/vazio honesto — nada de dado inventado.
+// Widgets dos painéis. A maioria lê uma rota do plugin cockpit (polling
+// compartilhado em source.tsx); o de Sistema lê a coleta local do main
+// (ops:system). Cada um mostra erro/vazio honesto — nada de dado inventado.
 
 export interface WidgetProps {
   refreshMs: number
@@ -322,39 +325,77 @@ export function AgendaWidget({ refreshMs }: WidgetProps) {
   )
 }
 
-// ─── Sistema (host do agente) ───────────────────────────────────────────────
+// ─── Sistema (host do cockpit) ──────────────────────────────────────────────
+// Métricas vêm de ops:system (src/main/metrics.ts) — a MESMA coleta local
+// multiplataforma da Ops > Sistema, que funciona no Windows/Linux/macOS.
+// O plugin cockpit (/sistema) é EXTRA e opcional: quando responde, acrescenta
+// gateway/ollama/processos do Hermes; quando não existe (404 no Windows), é
+// omitido em silêncio — nunca vira erro no card.
 export function SistemaWidget({ refreshMs }: WidgetProps) {
-  const sys = usePluginSource<Sistema>(API.sistema, refreshMs)
-  const s = sys.data
+  const sys = useAsync<SystemInfo>(ops.system, [], refreshMs)
+  const plugin = usePluginSource<Sistema>(API.sistema, Math.max(refreshMs, 60_000))
+  const d = sys.data
+  const p = plugin.error ? null : plugin.data
+  // volume do sistema primeiro; o resto na ordem da coleta
+  const vols = d ? [...d.volumes].sort((a, b) => Number(b.id === d.primaryVolume) - Number(a.id === d.primaryVolume)) : []
+  const gpu = d?.gpus[0]
+  const gpuPct = gpu?.pct ?? d?.gpu3dPct
+  const vramPct = gpu?.vramTotal && gpu.vramUsed != null ? (gpu.vramUsed / gpu.vramTotal) * 100 : null
   return (
     <PanelFrame
       titulo={`Sistema · ${HOST_LABEL}`}
-      fonte="psutil"
+      fonte="local"
       error={sys.error}
-      loading={sys.loading}
-      empty={!sys.loading && !s}
-      onRefresh={sys.refresh}
+      loading={sys.initial}
+      empty={!d && !sys.loading}
+      emptyText={sys.error ? 'sem métricas do host' : 'sem dados'}
+      onRefresh={() => void sys.reload()}
     >
-      {s && (
-        <div className="space-y-1.5 text-[11px]">
-          <Metric label="CPU" pct={s.cpu_percent} />
-          <Metric
-            label={`RAM ${s.mem_used_gb ?? '?'}/${s.mem_total_gb ?? '?'} GB`}
-            pct={s.mem_percent}
+      {d && (
+        <div className="space-y-1.5">
+          <SysBar label="CPU" value={d.cpu.model} pct={d.cpu.pct} title={`${d.cpu.model} · ${d.cpu.cores} núcleos`} />
+          <SysBar
+            label={`RAM ${fmtBytes(d.mem.used)}`}
+            value={`${fmtBytes(d.mem.free)} livres de ${fmtBytes(d.mem.total)}`}
+            pct={d.mem.pct}
+            title={`"usado" medido por ${d.mem.source}`}
           />
-          <Metric label={`Disco · ${s.disk_free_gb ?? '?'} GB livres`} pct={s.disk_percent} />
+          {vols.map((v) => (
+            <SysBar
+              key={v.id}
+              label={v.id === d.primaryVolume ? `${v.id} sistema` : v.label ? `${v.id} ${v.label}` : v.id}
+              value={`${fmtBytes(v.free)} livres de ${fmtBytes(v.total)}`}
+              pct={v.pct}
+              title={[v.id, v.label, v.fs].filter(Boolean).join(' · ')}
+            />
+          ))}
+          {gpu && gpuPct != null && (
+            <SysBar
+              label={`GPU ${gpu.name}`}
+              value={gpu.pct == null ? 'soma dos engines' : gpu.source}
+              pct={gpuPct}
+              title={`${gpu.name} · ${gpu.source}`}
+            />
+          )}
+          {gpu && vramPct != null && (
+            <SysBar label="vram" value={`${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}`} pct={vramPct} />
+          )}
           <div className="flex flex-wrap gap-x-3 text-[10px] text-dim">
-            {s.load1 != null && <span>load {s.load1.toFixed(2)}</span>}
-            {s.bateria_percent != null && (
-              <span>
-                bateria {Math.round(s.bateria_percent)}%{s.bateria_carregando ? ' ⚡' : ''}
-              </span>
-            )}
-            <span className={s.ollama ? 'text-phos' : 'text-faint'}>ollama {s.ollama ? 'on' : 'off'}</span>
-            {s.hermes_processes != null && <span>{s.hermes_processes} proc hermes</span>}
-            <span className={s.gateway ? 'text-phos' : 'text-faint'}>
-              gateway {s.gateway ? (s.gateway.code_version ?? 'on') : 'sem estado'}
+            <span title={[d.hostname, d.osVersion, d.osDetail].filter(Boolean).join(' · ')}>
+              {d.osVersion} · no ar há {fmtUptime(d.uptimeSec)}
             </span>
+            {d.load && <span>load {d.load[0].toFixed(2)}</span>}
+            {!gpu && <span className="text-faint">{d.gpuError ?? 'sem GPU'}</span>}
+            {/* extras só do plugin cockpit: ausentes (e silenciosos) sem ele */}
+            {p && (
+              <>
+                <span className={p.ollama ? 'text-phos' : 'text-faint'}>ollama {p.ollama ? 'on' : 'off'}</span>
+                {p.hermes_processes != null && <span>{p.hermes_processes} proc hermes</span>}
+                <span className={p.gateway ? 'text-phos' : 'text-faint'}>
+                  gateway {p.gateway ? (p.gateway.code_version ?? 'on') : 'sem estado'}
+                </span>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -362,14 +403,18 @@ export function SistemaWidget({ refreshMs }: WidgetProps) {
   )
 }
 
-function Metric({ label, pct }: { label: string; pct?: number }) {
+/** Linha compacta "rótulo · valor · %" com barra de uso (tons de usageTone). */
+function SysBar({ label, value, pct, title }: { label: string; value?: string; pct: number; title?: string }) {
   return (
-    <div>
-      <div className="flex justify-between text-[10px]">
-        <span className="text-dim">{label}</span>
-        <span className="text-faint">{pct != null ? `${Math.round(pct)}%` : '—'}</span>
+    <div title={title}>
+      <div className="flex items-baseline gap-2 text-[10px]">
+        <span className="max-w-[60%] shrink-0 truncate text-dim">{label}</span>
+        <span className="ml-auto min-w-0 truncate text-faint">{value ?? ''}</span>
+        <span className={`w-8 shrink-0 text-right tabular-nums ${pct >= 90 ? 'text-alert' : pct >= 80 ? 'text-warn' : 'text-dim'}`}>
+          {pct.toFixed(0)}%
+        </span>
       </div>
-      <Bar pct={pct ?? null} tone="phos" />
+      <Meter pct={pct} tone={usageTone(pct)} className="!h-1" />
     </div>
   )
 }
