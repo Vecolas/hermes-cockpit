@@ -1,12 +1,18 @@
 import { useEffect, type ReactNode } from 'react'
-import { fmtBytes, fmtUptime, ops, type GpuInfo, type SystemInfo, type VolumeInfo } from '../../lib/ops'
+import { fmtBytes, fmtUptime, ops, type GpuInfo, type SystemInfo } from '../../lib/ops'
 import { HOST_LABEL } from '../../lib/platform'
-import { ErrorState, Meter, SectionHeader, SkeletonRows, Tag, useAsync, usageTone } from './ui'
+import { displayTone } from '../../lib/radial'
+import { systemCards, vramPct } from '../../lib/system-cards'
+import { RadialMeter, RadialStat } from '../ui/RadialMeter'
+import { ErrorState, SectionHeader, SkeletonRows, Tag, useAsync } from './ui'
 
 // Seção "Sistema" da Central Ops: CPU (modelo, núcleos, uso total e por
 // núcleo), RAM, volumes e GPU — tudo de ops:system (src/main/metrics.ts), que
 // é multiplataforma. Fonte parcial (ex.: uso de GPU indisponível no macOS)
 // aparece como chip honesto, nunca como erro.
+//
+// Os cartões de uso são donuts (components/ui/RadialMeter.tsx) com a MESMA
+// lista do widget de painel (lib/system-cards.ts), só maiores.
 
 const REFRESH_MS = 4000
 
@@ -49,9 +55,8 @@ export function SystemSection({ onCount }: { onCount?: (n: number) => void }) {
           <SkeletonRows rows={6} cols={2} />
         ) : (
           <div className="hc-fade-in space-y-3">
-            <CpuCard info={d} />
-            <MemCard info={d} />
-            <VolumesCard info={d} />
+            <ResourcesCard info={d} />
+            <CoresCard info={d} />
             <GpuCard info={d} />
           </div>
         )}
@@ -72,103 +77,72 @@ function Card({ title, right, children }: { title: string; right?: ReactNode; ch
   )
 }
 
-/** Linha "rótulo · valor" com barra de uso. */
-function Bar({ label, value, pct, title }: { label: ReactNode; value: ReactNode; pct: number; title?: string }) {
+/** CPU · RAM · GPU · volumes em donuts grandes (mesma ordem do widget). */
+function ResourcesCard({ info }: { info: SystemInfo }) {
+  const cards = systemCards(info)
   return (
-    <div title={title}>
-      <div className="mb-1 flex items-baseline gap-2 text-[11.5px]">
-        <span className="min-w-0 truncate text-dim">{label}</span>
-        <span className="ml-auto shrink-0 tabular-nums text-faint">{value}</span>
-        <span className={`w-11 shrink-0 text-right tabular-nums ${pct >= 90 ? 'text-alert' : pct >= 80 ? 'text-warn' : 'text-dim'}`}>
-          {pct.toFixed(0)}%
-        </span>
+    <Card
+      title="Recursos"
+      right={
+        <>
+          <Tag tone="neutral">{info.cpu.cores} núcleos</Tag>
+          <Tag tone="neutral" title="de onde veio o 'usado' da memória">
+            mem {info.mem.source}
+          </Tag>
+          <Tag tone="neutral">{info.volumes.length === 1 ? '1 volume' : `${info.volumes.length} volumes`}</Tag>
+        </>
+      }
+    >
+      {info.volumesError && <div className="mb-2 text-[10.5px] text-faint">lista parcial de volumes: {info.volumesError}</div>}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(136px,1fr))] gap-2">
+        {cards.map((c) => (
+          <RadialStat
+            key={c.key}
+            icon={c.icon}
+            label={c.label}
+            value={c.pct}
+            tone={c.tone}
+            detail={c.detail}
+            sub={c.sub}
+            title={c.title}
+            size={86}
+            strokeWidth={7}
+            className="!px-2 !py-3"
+          />
+        ))}
       </div>
-      <Meter pct={pct} tone={usageTone(pct)} />
-    </div>
+    </Card>
   )
 }
 
-function CpuCard({ info }: { info: SystemInfo }) {
+/** Uso por núcleo em mini-donuts (mesma janela de amostragem do uso total). */
+function CoresCard({ info }: { info: SystemInfo }) {
   const c = info.cpu
+  if (c.perCore.length <= 1) return null
   return (
     <Card
-      title="CPU"
+      title="Núcleos"
       right={
         <>
-          <Tag tone="neutral">{c.cores} núcleos</Tag>
+          {c.sampleMs ? <Tag tone="neutral">amostra de {(c.sampleMs / 1000).toFixed(1)}s</Tag> : null}
           {c.speedMhz ? <Tag tone="neutral">{(c.speedMhz / 1000).toFixed(2)} GHz</Tag> : null}
         </>
       }
     >
-      <div className="mb-2 truncate text-[11.5px] text-ink" title={c.model}>
-        {c.model}
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(60px,1fr))] justify-items-center gap-2">
+        {c.perCore.map((p, i) => (
+          <RadialMeter
+            key={i}
+            value={p}
+            tone={displayTone(p)}
+            size={54}
+            strokeWidth={4}
+            aria={`núcleo ${i}`}
+            title={`núcleo ${i} · ${p.toFixed(1)}%`}
+            caption={`#${i}`}
+          />
+        ))}
       </div>
-      <Bar
-        label="uso total"
-        value={c.sampleMs ? `amostra de ${(c.sampleMs / 1000).toFixed(1)}s` : ''}
-        pct={c.pct}
-        title="diferença entre duas leituras de os.cpus()"
-      />
-      {c.perCore.length > 1 && (
-        <div className="mt-2.5 grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-x-3 gap-y-1.5">
-          {c.perCore.map((p, i) => (
-            <div key={i} title={`núcleo ${i} · ${p.toFixed(1)}%`}>
-              <div className="flex items-baseline gap-1 text-[10px]">
-                <span className="text-faint">#{i}</span>
-                <span className={`ml-auto tabular-nums ${p >= 90 ? 'text-alert' : p >= 80 ? 'text-warn' : 'text-faint'}`}>{p.toFixed(0)}%</span>
-              </div>
-              <Meter pct={p} tone={usageTone(p)} className="!h-1" />
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  )
-}
-
-const MEM_SOURCE: Record<string, string> = {
-  vm_stat: 'vm_stat (ativa + wired + comprimida, como o Monitor de Atividade)',
-  '/proc/meminfo': '/proc/meminfo MemAvailable',
-  'os.freemem': 'os.totalmem − os.freemem',
-}
-
-function MemCard({ info }: { info: SystemInfo }) {
-  const m = info.mem
-  return (
-    <Card title="Memória" right={<Tag tone="neutral" title={MEM_SOURCE[m.source] ?? m.source}>{m.source}</Tag>}>
-      <Bar label={`${fmtBytes(m.used)} em uso`} value={`${fmtBytes(m.free)} livres de ${fmtBytes(m.total)}`} pct={m.pct} />
-    </Card>
-  )
-}
-
-function volLabel(v: VolumeInfo, primary?: string): string {
-  const name = v.label ? `${v.id} ${v.label}` : v.id
-  return v.id === primary ? `${name} · sistema` : name
-}
-
-function VolumesCard({ info }: { info: SystemInfo }) {
-  const vols = info.volumes
-  return (
-    <Card
-      title="Armazenamento"
-      right={<Tag tone="neutral">{vols.length === 1 ? '1 volume' : `${vols.length} volumes`}</Tag>}
-    >
-      {info.volumesError && <div className="mb-2 text-[10.5px] text-faint">lista parcial: {info.volumesError}</div>}
-      {vols.length === 0 ? (
-        <div className="text-[11.5px] text-faint">nenhum volume local encontrado</div>
-      ) : (
-        <div className="space-y-2.5">
-          {vols.map((v) => (
-            <Bar
-              key={v.id}
-              label={volLabel(v, info.primaryVolume)}
-              value={`${fmtBytes(v.used)} / ${fmtBytes(v.total)} · ${fmtBytes(v.free)} livres`}
-              pct={v.pct}
-              title={[v.id, v.label, v.fs].filter(Boolean).join(' · ')}
-            />
-          ))}
-        </div>
-      )}
     </Card>
   )
 }
@@ -182,16 +156,8 @@ function GpuCard({ info }: { info: SystemInfo }) {
       ) : (
         <div className="space-y-3">
           {gpus.map((g, i) => (
-            <GpuRow key={`${g.name}-${i}`} gpu={g} />
+            <GpuRow key={`${g.name}-${i}`} gpu={g} sum={info.gpu3dPct} />
           ))}
-          {info.gpu3dPct != null && (
-            <Bar
-              label="3D · todos os adaptadores"
-              value="soma dos engines"
-              pct={info.gpu3dPct}
-              title="Win32_VideoController não expõe LUID: com mais de um adaptador o uso não é atribuível a um deles"
-            />
-          )}
           {info.gpuError && <div className="text-[10.5px] text-faint">{info.gpuError}</div>}
         </div>
       )}
@@ -199,25 +165,59 @@ function GpuCard({ info }: { info: SystemInfo }) {
   )
 }
 
-function GpuRow({ gpu }: { gpu: GpuInfo }) {
-  const vramPct = gpu.vramTotal && gpu.vramUsed != null ? (gpu.vramUsed / gpu.vramTotal) * 100 : null
+function GpuRow({ gpu, sum }: { gpu: GpuInfo; sum?: number }) {
+  const vp = vramPct(gpu)
   return (
-    <div>
-      <div className="mb-1.5 truncate text-[11.5px] text-ink" title={`${gpu.name} · ${gpu.source}`}>
-        {gpu.name}
+    <div className="flex items-center gap-3">
+      <div className="flex gap-2">
+        <RadialMeter
+          value={gpu.pct ?? null}
+          tone={displayTone(gpu.pct)}
+          size={62}
+          strokeWidth={5}
+          aria={`uso da GPU ${gpu.name}`}
+          title={gpu.pct == null ? 'uso desta GPU indisponível nesta plataforma' : `${gpu.pct.toFixed(1)}%`}
+          caption="uso"
+        />
+        {vp != null && (
+          <RadialMeter
+            value={vp}
+            tone={displayTone(vp)}
+            size={62}
+            strokeWidth={5}
+            aria={`VRAM da GPU ${gpu.name}`}
+            title={`${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}`}
+            caption="vram"
+          />
+        )}
+        {/* Win32_VideoController não expõe LUID: com mais de um adaptador o 3D
+            somado não é atribuível a um deles — por isso só aparece quando o
+            próprio adaptador não informa uso. */}
+        {gpu.pct == null && sum != null && (
+          <RadialMeter
+            value={sum}
+            tone={displayTone(sum)}
+            size={62}
+            strokeWidth={5}
+            aria="uso 3D somado de todos os adaptadores"
+            title="soma dos engines 3D de todos os adaptadores (não é atribuível a um deles)"
+            caption="3d total"
+          />
+        )}
       </div>
-      {gpu.pct == null ? (
-        <div className="text-[10.5px] text-faint">uso indisponível</div>
-      ) : (
-        <Bar label="uso" value="" pct={gpu.pct} />
-      )}
-      {vramPct != null ? (
-        <div className="mt-2">
-          <Bar label="vram" value={`${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}`} pct={vramPct} />
+      <div className="min-w-0">
+        <div className="truncate text-[11.5px] text-ink" title={`${gpu.name} · ${gpu.source}`}>
+          {gpu.name}
         </div>
-      ) : gpu.vramTotal ? (
-        <div className="mt-1 text-[10.5px] text-faint">vram {fmtBytes(gpu.vramTotal)} (uso não informado)</div>
-      ) : null}
+        <div className="text-[10.5px] text-faint">
+          {gpu.pct == null ? 'uso indisponível' : `${gpu.pct.toFixed(0)}% em uso`}
+          {vp != null
+            ? ` · vram ${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}`
+            : gpu.vramTotal
+              ? ` · vram ${fmtBytes(gpu.vramTotal)} (uso não informado)`
+              : ''}
+        </div>
+      </div>
     </div>
   )
 }

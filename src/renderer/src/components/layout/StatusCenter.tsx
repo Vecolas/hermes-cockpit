@@ -3,6 +3,7 @@ import { setAutoMode, useAutoMode } from '../../lib/automode'
 import { useQuota } from '../../lib/quota'
 import { fmtResetParts, pctTone, snapshotWorstPct, TONE_VAR } from '../../lib/quota-model'
 import { fmtUptime, ops, type SystemInfo } from '../../lib/ops'
+import { displayTone, type MeterTone } from '../../lib/radial'
 import type { ConnState } from '../../lib/rpc'
 import { HOST_LABEL } from '../../lib/platform'
 import { useAsync } from '../ops/ui'
@@ -15,11 +16,21 @@ import { cx } from '../ui/cx'
 type Tone = 'ok' | 'warn' | 'off' | 'bad'
 
 const RANK: Record<Tone, number> = { ok: 0, off: 1, warn: 2, bad: 3 }
+/** tom de uso (lib/radial) → tom deste popover */
+const TONE_OF: Record<MeterTone, Tone> = { phos: 'ok', warn: 'warn', alert: 'bad', amber: 'off', cyanic: 'ok' }
+// Mesma regra de cor dos medidores (lib/radial.ts): verde = normal, laranja
+// (--color-warn) = atenção ≥80%, vermelho = crítico ≥90%.
 const DOT: Record<Tone, string> = {
   ok: 'bg-phos shadow-[0_0_6px_var(--color-phos)]',
-  warn: 'bg-amber hc-pulse-dot',
+  warn: 'bg-warn hc-pulse-dot',
   bad: 'bg-alert hc-pulse-dot',
   off: 'bg-faint',
+}
+const VALUE_INK: Record<Tone, string> = {
+  ok: 'text-dim',
+  warn: 'text-warn',
+  bad: 'text-alert',
+  off: 'text-dim',
 }
 
 interface Row {
@@ -85,7 +96,8 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
         ? { tone: 'bad' as Tone, value: 'erro', detail: `ops:system: ${sys.error}` }
         : { tone: 'off' as Tone, value: '…', detail: 'coletando métricas do host' }
       : {
-          tone: (worstUse >= 90 ? 'bad' : worstUse >= 80 ? 'warn' : 'ok') as Tone,
+          // mesmos limiares dos donuts, sobre a % ARREDONDADA que a linha mostra
+          tone: TONE_OF[displayTone(worstUse)],
           value: `CPU ${pct(s.cpu.pct)} · RAM ${pct(s.mem.pct)}`,
           detail: [
             `${s.hostname} · ${s.osVersion} · no ar há ${fmtUptime(s.uptimeSec)}`,
@@ -154,7 +166,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
             <span key={r.id} className={cx('h-1.5 w-1.5 rounded-full transition-colors duration-[var(--hc-dur-3)]', DOT[r.tone])} />
           ))}
         </span>
-        <span className={cx('hc-pill-label tabular-nums', cota.tone === 'bad' && 'text-alert')}>
+        <span className={cx('hc-pill-label tabular-nums', cota.tone === 'bad' ? 'text-alert' : cota.tone === 'warn' && 'text-warn')}>
           {quota.providers.length > 0 ? cota.value : 'status'}
         </span>
         {auto && (
@@ -177,7 +189,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
                   <div className="flex items-center gap-2 text-[11px]">
                     <span className="text-ink">{r.label}</span>
                     <span className={cx('ml-auto h-1.5 w-1.5 shrink-0 rounded-full', DOT[r.tone])} />
-                    <span className={cx('shrink-0 tabular-nums', r.tone === 'bad' ? 'text-alert' : 'text-dim')}>{r.value}</span>
+                    <span className={cx('shrink-0 tabular-nums', VALUE_INK[r.tone])}>{r.value}</span>
                   </div>
                   <div className="truncate text-[10px] text-faint">{r.detail}</div>
                   {r.windows && r.windows.length > 0 && (

@@ -1,8 +1,9 @@
-import { fmtBytes, fmtUptime, ops, type SystemInfo } from '../../lib/ops'
+import { fmtUptime, ops, type SystemInfo } from '../../lib/ops'
 import { HOST_LABEL } from '../../lib/platform'
 import { agendaPath, inSpace, spaceOfAccount, useSpace, type Space } from '../../lib/space'
-import { Meter, useAsync, usageTone } from '../ops/ui'
-import { SkeletonLines } from '../ui/Skeleton'
+import { mainGpu, systemCards } from '../../lib/system-cards'
+import { useAsync } from '../ops/ui'
+import { RadialStat } from '../ui/RadialMeter'
 import { PanelFrame } from './PanelFrame'
 import { usePluginSource } from './source'
 import {
@@ -331,16 +332,17 @@ export function AgendaWidget({ refreshMs }: WidgetProps) {
 // O plugin cockpit (/sistema) é EXTRA e opcional: quando responde, acrescenta
 // gateway/ollama/processos do Hermes; quando não existe (404 no Windows), é
 // omitido em silêncio — nunca vira erro no card.
+//
+// Layout: linha de cartões com donut (RadialStat) que quebra em várias linhas
+// — grid auto-fill de ~120px, então num painel estreito cabem 2 por linha sem
+// cortar texto (rótulos longos truncam e ficam no title).
 export function SistemaWidget({ refreshMs }: WidgetProps) {
   const sys = useAsync<SystemInfo>(ops.system, [], refreshMs)
   const plugin = usePluginSource<Sistema>(API.sistema, Math.max(refreshMs, 60_000))
   const d = sys.data
   const p = plugin.error ? null : plugin.data
-  // volume do sistema primeiro; o resto na ordem da coleta
-  const vols = d ? [...d.volumes].sort((a, b) => Number(b.id === d.primaryVolume) - Number(a.id === d.primaryVolume)) : []
-  const gpu = d?.gpus[0]
-  const gpuPct = gpu?.pct ?? d?.gpu3dPct
-  const vramPct = gpu?.vramTotal && gpu.vramUsed != null ? (gpu.vramUsed / gpu.vramTotal) * 100 : null
+  const cards = d ? systemCards(d) : []
+  const gpu = d ? mainGpu(d) : null
   return (
     <PanelFrame
       titulo={`Sistema · ${HOST_LABEL}`}
@@ -352,34 +354,23 @@ export function SistemaWidget({ refreshMs }: WidgetProps) {
       onRefresh={() => void sys.reload()}
     >
       {d && (
-        <div className="space-y-1.5">
-          <SysBar label="CPU" value={d.cpu.model} pct={d.cpu.pct} title={`${d.cpu.model} · ${d.cpu.cores} núcleos`} />
-          <SysBar
-            label={`RAM ${fmtBytes(d.mem.used)}`}
-            value={`${fmtBytes(d.mem.free)} livres de ${fmtBytes(d.mem.total)}`}
-            pct={d.mem.pct}
-            title={`"usado" medido por ${d.mem.source}`}
-          />
-          {vols.map((v) => (
-            <SysBar
-              key={v.id}
-              label={v.id === d.primaryVolume ? `${v.id} sistema` : v.label ? `${v.id} ${v.label}` : v.id}
-              value={`${fmtBytes(v.free)} livres de ${fmtBytes(v.total)}`}
-              pct={v.pct}
-              title={[v.id, v.label, v.fs].filter(Boolean).join(' · ')}
-            />
-          ))}
-          {gpu && gpuPct != null && (
-            <SysBar
-              label={`GPU ${gpu.name}`}
-              value={gpu.pct == null ? 'soma dos engines' : gpu.source}
-              pct={gpuPct}
-              title={`${gpu.name} · ${gpu.source}`}
-            />
-          )}
-          {gpu && vramPct != null && (
-            <SysBar label="vram" value={`${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}`} pct={vramPct} />
-          )}
+        <div className="space-y-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] gap-1.5">
+            {cards.map((c) => (
+              <RadialStat
+                key={c.key}
+                icon={c.icon}
+                label={c.label}
+                value={c.pct}
+                tone={c.tone}
+                detail={c.detail}
+                sub={c.sub}
+                title={c.title}
+                size={52}
+                strokeWidth={5}
+              />
+            ))}
+          </div>
           <div className="flex flex-wrap gap-x-3 text-[10px] text-dim">
             <span title={[d.hostname, d.osVersion, d.osDetail].filter(Boolean).join(' · ')}>
               {d.osVersion} · no ar há {fmtUptime(d.uptimeSec)}
@@ -400,22 +391,6 @@ export function SistemaWidget({ refreshMs }: WidgetProps) {
         </div>
       )}
     </PanelFrame>
-  )
-}
-
-/** Linha compacta "rótulo · valor · %" com barra de uso (tons de usageTone). */
-function SysBar({ label, value, pct, title }: { label: string; value?: string; pct: number; title?: string }) {
-  return (
-    <div title={title}>
-      <div className="flex items-baseline gap-2 text-[10px]">
-        <span className="max-w-[60%] shrink-0 truncate text-dim">{label}</span>
-        <span className="ml-auto min-w-0 truncate text-faint">{value ?? ''}</span>
-        <span className={`w-8 shrink-0 text-right tabular-nums ${pct >= 90 ? 'text-alert' : pct >= 80 ? 'text-warn' : 'text-dim'}`}>
-          {pct.toFixed(0)}%
-        </span>
-      </div>
-      <Meter pct={pct} tone={usageTone(pct)} className="!h-1" />
-    </div>
   )
 }
 

@@ -162,7 +162,7 @@ test('Codex: janela sem used_percent fica fora', () => {
 
 /** `<codex>/sessions/AAAA/MM/DD/rollout-*.jsonl` temporário. */
 function codexFixture(): { dir: string; sessions: string; cleanup: () => void } {
-  const dir = mkdtempSync(join(tmpdir(), 'vecos-orbit-codex-'))
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-cockpit-codex-'))
   const sessions = join(dir, 'sessions')
   for (const [day, files] of [
     ['2026/11/01', ['rollout-2026-11-01T10-00-00-aaa.jsonl']],
@@ -239,7 +239,7 @@ test('Codex: sem rollout utilizável devolve null (nada de dado falso)', () => {
 })
 
 test('Hermes: provedores já cobertos por coletor dedicado não viram aba', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'vecos-orbit-hermes-'))
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-cockpit-hermes-'))
   try {
     writeFileSync(
       join(dir, 'auth.json'),
@@ -269,7 +269,7 @@ test('Hermes: provedores já cobertos por coletor dedicado não viram aba', () =
 })
 
 test('Hermes: auth.json ausente/ilegível devolve lista vazia', () => {
-  assert.deepEqual(hermesConfiguredProviders(join(tmpdir(), 'nao-existe-vecos'), new Set()), [])
+  assert.deepEqual(hermesConfiguredProviders(join(tmpdir(), 'nao-existe-xyz'), new Set()), [])
 })
 
 test('scrub tira segredo de mensagem de erro', () => {

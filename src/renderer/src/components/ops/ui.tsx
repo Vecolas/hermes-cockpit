@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { errMsg } from '../../lib/ops'
+// regra de cor e tipos de tom moram em lib/radial.ts (pura, testada) e sao
+// reexportados aqui para nao quebrar os imports existentes de './ui'.
+import { displayTone, INFO_TONE, usageTone, usageToneOf, type MeterTone } from '../../lib/radial'
+
 import { useViewActive } from '../layout/views'
+
+export { displayTone, INFO_TONE, usageTone, usageToneOf, type MeterTone }
 
 // Peças comuns da Central Ops: carregamento assíncrono com polling, cabeçalho
 // de seção (busca/refresh), confirmação inline de 2 cliques, skeleton e
@@ -297,8 +303,6 @@ export function Th({ children, className = '', onClick, active }: { children?: R
   )
 }
 
-export type MeterTone = 'amber' | 'phos' | 'cyanic' | 'alert' | 'warn'
-
 const METER_BG: Record<MeterTone, string> = {
   amber: 'bg-amber',
   phos: 'bg-phos',
@@ -316,8 +320,6 @@ export function Meter({ pct, tone = 'amber', className = '' }: { pct: number; to
   )
 }
 
-/** Tom de uso: ≥90% alerta, ≥80% aviso, resto fósforo (tokens do tema). */
-export const usageTone = (pct: number): MeterTone => (pct >= 90 ? 'alert' : pct >= 80 ? 'warn' : 'phos')
 
 export function useLocal<T extends string>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {

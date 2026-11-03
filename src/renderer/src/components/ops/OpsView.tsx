@@ -9,7 +9,9 @@ import { PortsSection } from './PortsSection'
 import { ProcessesSection } from './ProcessesSection'
 import { ReposSection } from './ReposSection'
 import { SystemSection } from './SystemSection'
-import { Meter, useAsync, useLocal, usageTone } from './ui'
+import { displayTone } from '../../lib/radial'
+import { RadialMeter } from '../ui/RadialMeter'
+import { useAsync, useLocal } from './ui'
 
 // Central Ops (área central): sidebar de seções com contadores + conteúdo.
 // Só a seção ativa fica montada (o polling dela para quando sai de vista);
@@ -136,9 +138,10 @@ export function OpsView({ rpc }: { rpc: HermesRpc | null }) {
 }
 
 /**
- * Rodapé da rail: resumo do host (CPU, RAM, volume do sistema e GPU) com
- * barras. Multiplataforma — os números vêm de ops:system (src/main/metrics.ts)
- * e o rótulo é o hostname + SO, não "Mac". Clicar abre a seção Sistema.
+ * Rodapé da rail: resumo do host (CPU, RAM, volume do sistema e GPU) em donuts
+ * pequenos, sem texto embaixo — o detalhe fica no title de cada anel.
+ * Multiplataforma — os números vêm de ops:system (src/main/metrics.ts) e o
+ * rótulo é o hostname + SO, não "Mac". Clicar abre a seção Sistema.
  */
 function SystemCard({ onOpen, active }: { onOpen: () => void; active: boolean }) {
   const s = useAsync<SystemInfo>(ops.system, [], 5_000)
@@ -171,20 +174,30 @@ function SystemCard({ onOpen, active }: { onOpen: () => void; active: boolean })
         </div>
       ) : (
         <div className="space-y-1.5">
-          <Row label="cpu" value={`${d.cpu.pct.toFixed(0)}% · ${d.cpu.cores}c`} pct={d.cpu.pct} />
-          <Row label="mem" value={`${fmtBytes(d.mem.used)} / ${fmtBytes(d.mem.total)}`} pct={d.mem.pct} />
-          {disk && <Row label={disk.id === '/' ? 'disco' : disk.id.toLowerCase()} value={`${fmtBytes(disk.free)} livre`} pct={disk.pct} />}
-          {gpu &&
-            (gpuPct != null ? (
-              <Row label="gpu" value={gpu.vramTotal && gpu.vramUsed != null ? `${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}` : `${gpuPct.toFixed(0)}%`} pct={gpuPct} />
-            ) : (
-              <div className="flex items-center gap-1 pt-0.5">
-                <span className="uppercase tracking-[0.14em] text-faint">gpu</span>
-                <span className="ml-auto truncate text-faint" title={gpu.name}>
-                  sem uso
-                </span>
-              </div>
-            ))}
+          <div className="flex items-start justify-between gap-1">
+            <Dial label="cpu" pct={d.cpu.pct} title={`CPU ${d.cpu.pct.toFixed(0)}% · ${d.cpu.cores} núcleos · ${d.cpu.model}`} />
+            <Dial label="mem" pct={d.mem.pct} title={`RAM ${fmtBytes(d.mem.used)} / ${fmtBytes(d.mem.total)}`} />
+            {disk && (
+              <Dial
+                label={disk.id === '/' ? 'disco' : disk.id.toLowerCase()}
+                pct={disk.pct}
+                title={`${disk.id} · ${fmtBytes(disk.used)} / ${fmtBytes(disk.total)} · ${fmtBytes(disk.free)} livres`}
+              />
+            )}
+            {gpu && (
+              <Dial
+                label="gpu"
+                pct={gpuPct}
+                title={[
+                  gpu.name,
+                  gpuPct == null ? 'uso indisponível' : `${gpuPct.toFixed(0)}%`,
+                  gpu.vramTotal && gpu.vramUsed != null ? `vram ${fmtBytes(gpu.vramUsed)} / ${fmtBytes(gpu.vramTotal)}` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              />
+            )}
+          </div>
           <div className="truncate pt-0.5 text-faint">{d.hostname}</div>
           <div className="truncate text-faint">
             {d.osVersion}
@@ -196,14 +209,17 @@ function SystemCard({ onOpen, active }: { onOpen: () => void; active: boolean })
   )
 }
 
-function Row({ label, value, pct }: { label: string; value: string; pct: number }) {
+/** Donut pequeno da rail: só o anel + a % dentro; o rótulo vai no caption. */
+function Dial({ label, pct, title }: { label: string; pct: number | null; title: string }) {
   return (
-    <div>
-      <div className="mb-0.5 flex items-center gap-1">
-        <span className="uppercase tracking-[0.14em] text-faint">{label}</span>
-        <span className="ml-auto truncate tabular-nums text-dim">{value}</span>
-      </div>
-      <Meter pct={pct} tone={usageTone(pct)} />
-    </div>
+    <RadialMeter
+      value={pct}
+      tone={displayTone(pct)}
+      size={40}
+      strokeWidth={3.5}
+      aria={label}
+      title={title}
+      caption={label}
+    />
   )
 }

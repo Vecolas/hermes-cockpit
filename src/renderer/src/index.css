@@ -997,3 +997,16 @@ body::before {
   .hc-ecg path { stroke-dasharray: none; stroke-dashoffset: 0; }
   .hc-sweep::before { display: none; }
 }
+
+/* ─── Donut de uso (components/ui/RadialMeter.tsx) ──────────────────────────
+   Barra → anel: a geometria vem de lib/radial.ts e o arco anima pelo
+   stroke-dashoffset. O bloco global de prefers-reduced-motion (acima) já zera
+   a transição. */
+.hc-radial-track {
+  stroke: color-mix(in srgb, var(--color-edge) 88%, var(--color-panel2));
+}
+.hc-radial-arc {
+  transition:
+    stroke-dashoffset var(--hc-dur-4) var(--hc-ease-out),
+    stroke var(--hc-dur-2) linear;
+}
