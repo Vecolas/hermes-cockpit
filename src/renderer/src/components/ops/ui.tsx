@@ -128,10 +128,11 @@ export function SectionHeader({
   )
 }
 
-type Tone = 'neutral' | 'amber' | 'phos' | 'cyanic' | 'alert'
+type Tone = 'neutral' | 'amber' | 'warn' | 'phos' | 'cyanic' | 'alert'
 const TONE: Record<Tone, string> = {
   neutral: 'border-edge2 text-dim',
   amber: 'border-amber/40 text-amber',
+  warn: 'border-[color-mix(in_srgb,var(--color-warn)_40%,transparent)] text-warn',
   phos: 'border-phos/40 text-phos',
   cyanic: 'border-cyanic/40 text-cyanic',
   alert: 'border-alert/40 text-alert',
@@ -161,7 +162,7 @@ export function Btn({
   className?: string
 }) {
   const hover =
-    tone === 'alert' ? 'hover:bg-alert/10' : tone === 'amber' ? 'hover:bg-amber/10' : tone === 'phos' ? 'hover:bg-phos/10' : 'hover:bg-panel2 hover:text-ink'
+    tone === 'alert' ? 'hover:bg-alert/10' : tone === 'amber' ? 'hover:bg-amber/10' : tone === 'phos' ? 'hover:bg-phos/10' : 'hover:bg-hover hover:text-ink'
   return (
     <button
       type="button"

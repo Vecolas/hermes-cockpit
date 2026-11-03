@@ -118,7 +118,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
         title={rows.map((r) => `${r.label}: ${r.value}`).join('\n')}
         className={cx(
           'hc-press flex h-7 items-center gap-2 rounded-md border px-2 text-[11px] whitespace-nowrap',
-          open ? 'border-edge2 bg-panel2 text-ink' : 'border-transparent text-dim hover:border-edge2 hover:bg-panel2/60 hover:text-ink',
+          open ? 'border-edge2 bg-panel2 text-ink' : 'border-transparent text-dim hover:border-edge2 hover:bg-hover/60 hover:text-ink',
         )}
       >
         <span className="flex items-center gap-[3px]" aria-hidden>
@@ -141,7 +141,7 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
           <div className="label px-2 pt-1 pb-1.5">status</div>
           <ul className="hc-stagger">
             {rows.map((r) => (
-              <li key={r.id} className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-panel2/60" title={r.detail}>
+              <li key={r.id} className="flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-hover/60" title={r.detail}>
                 <Icon name={r.icon} size={13} className="mt-[1px] text-faint" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-[11px]">

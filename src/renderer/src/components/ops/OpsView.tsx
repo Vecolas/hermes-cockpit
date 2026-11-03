@@ -89,7 +89,7 @@ export function OpsView({ rpc }: { rpc: HermesRpc | null }) {
                 title={s.hint}
                 aria-current={on ? 'page' : undefined}
                 className={`group relative mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors ${
-                  on ? 'bg-amber/10 text-ink' : 'text-dim hover:bg-panel2 hover:text-ink'
+                  on ? 'bg-amber/10 text-ink' : 'text-dim hover:bg-hover hover:text-ink'
                 }`}
               >
                 {on && <span className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-amber" />}

@@ -99,7 +99,7 @@ export function PortsSection({ onCount }: { onCount?: (n: number) => void }) {
                 const local = r.addrs.some(isLocalAddr)
                 const exposed = r.addrs.some((a) => a === '*' || a === '[::]' || a === '0.0.0.0')
                 return (
-                  <tr key={`${r.pid}:${r.port}`} className="border-b border-edge/60 hover:bg-panel2/60">
+                  <tr key={`${r.pid}:${r.port}`} className="border-b border-edge/60 hover:bg-hover/60">
                     <td className="px-2 py-1 text-right tabular-nums text-amber">{r.port}</td>
                     <td className="px-2 py-1">
                       <span className="text-ink">{r.command}</span>
@@ -114,7 +114,7 @@ export function PortsSection({ onCount }: { onCount?: (n: number) => void }) {
                           </span>
                         ))}
                         {exposed && (
-                          <Tag tone="amber" title="escutando em todas as interfaces (visível na rede)">
+                          <Tag tone="warn" title="escutando em todas as interfaces (visível na rede)">
                             rede
                           </Tag>
                         )}

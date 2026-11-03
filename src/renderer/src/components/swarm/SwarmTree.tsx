@@ -179,7 +179,7 @@ const RunNode = memo(function RunNode({ run, pendingList, onOpen }: { run: RunMe
         <button type="button" onClick={onOpen} className="min-w-0 flex-1 truncate text-left text-[11.5px] text-ink hover:text-amber" title={run.task}>
           {run.title}
         </button>
-        <span key={`${run.status}-${pending}`} className={`hc-pop shrink-0 text-[10px] ${pending ? 'text-amber' : tone.text}`}>
+        <span key={`${run.status}-${pending}`} className={`hc-pop shrink-0 text-[10px] ${pending ? 'text-warn' : tone.text}`}>
           {pending ? (asks ? 'pergunta pra você' : pending > 1 ? `${pending} aprovações · você` : 'aprovação · você') : STATUS_LABEL[run.status]}
         </span>
       </div>
