@@ -43,7 +43,7 @@ const THEME: ITheme = {
 
 interface Props {
   id: string
-  /** 'shell' = zsh real via relay de PTY no main (ops:shell.*); 'hermes' = /api/pty (hermes --tui) */
+  /** 'shell' = shell real via relay de PTY no main (ops:shell.*); 'hermes' = /api/pty (hermes --tui) */
   kind?: 'shell' | 'hermes'
   /** cwd inicial do shell */
   cwd?: string | null
@@ -147,11 +147,11 @@ export function XtermView({ id, kind = 'hermes', cwd, cmd, profile, active, gene
       termRef.current?.write('\r\n\x1b[90m── shell encerrado ──\x1b[0m\r\n')
     })
     let cancelled = false
-    invoke('ops:shell.open', myId, { cwd: cwd ?? undefined, cmd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 })
-      .then(() => {
+    invoke<{ shell?: string }>('ops:shell.open', myId, { cwd: cwd ?? undefined, cmd, cols: term?.cols ?? 80, rows: term?.rows ?? 24 })
+      .then((r) => {
         if (cancelled) return
         openRef.current = true
-        statusRef.current('open')
+        statusRef.current('open', r?.shell)
         resizeFn.current()
       })
       .catch((e: unknown) => {

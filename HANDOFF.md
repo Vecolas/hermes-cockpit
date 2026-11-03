@@ -74,6 +74,17 @@ Funciona e está empacotado (`release/Hermes Cockpit-0.1.0-arm64.dmg`, Electron 
    reinventar health-check. Timeout atual de 90s é folgado de propósito.
 6. **DMG sem assinatura** (`identity: null` de propósito): primeira abertura
    exige botão direito → Abrir.
+7. **ConPTY no Windows: o filho herda os VALORES dos std handles do relay.**
+   O terminal do dock usa `CreatePseudoConsole` por ctypes
+   (`src/main/ipc/shell.ts::RELAY_WIN`). Ao criar o shell com
+   `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, o filho só usa o pseudoconsole se os
+   std handles do processo que spawna forem handles de console. No relay eles
+   são os pipes do Electron, e aí o shell lê/escreve nos pipes do pai: `cmd`
+   manda o stderr para fora do terminal e o **bash do MSYS (git-bash) trava na
+   inicialização sem imprimir nada** — parece bug de ConPTY, não é. Correção:
+   `CreateFileW('CONIN$'/'CONOUT$')` + `SetStdHandle` antes do `CreateProcessW`
+   (e restaurar depois). Também é obrigatório `windowsHide: true` no spawn do
+   python, senão aparece um console solto.
 
 ## 4. Contratos com o backend (fontes de verdade)
 
@@ -198,16 +209,36 @@ Toaster...). Utilitárias de animação `hc-*` em `index.css` (respeitam
 
 **Instalar o swarm.** `npm run swarm:install` copia `swarm/` para
 `~/.hermes/cockpit/swarm-bin/`, cria o estado em `~/.hermes/cockpit/swarm/` e
-registra o MCP `claude_swarm` em todos os profiles (backup
-`config.yaml.bak-<data>`). Rode de novo sempre que `swarm/` mudar. Processos
+registra o MCP `claude_swarm` nos profiles que existem de fato (backup
+`config.yaml.bak-<data>`). Sem `--profiles`, a lista vem de
+`<raiz do Hermes>/profiles/*/config.yaml` — a raiz é resolvida por
+`hermesHome()` (HERMES_HOME aponta para o perfil ativo, então a raiz é o avô;
+no Windows é `%LOCALAPPDATA%\hermes`, não `~/.hermes`). Rode de novo sempre que
+`swarm/` mudar. Processos
 Hermes já vivos só enxergam o MCP depois de reiniciar/recarregar a config.
 Worktrees em `~/.hermes/cockpit/worktrees/<repo>-<runId>` (branch
 `hermes/<runId>`).
 
 **Limitações conhecidas.**
-- `/api/pty` roda `hermes --tui` do profile, não um shell, e ignora cwd — o
-  Terminal do dock não segue o workspace. Shell real exigiria canal novo no
-  main (`/usr/bin/script -q /dev/null /bin/zsh -l`).
+- `/api/pty` roda `hermes --tui` do profile, não um shell, e ignora cwd. O
+  shell de verdade do dock vem do relay de PTY no main (`ops:shell.*` em
+  `src/main/ipc/shell.ts`), que segue o workspace: POSIX via `pty.fork` +
+  `$SHELL -l`; Windows via ConPTY (ver gotcha §3.7), shell = git-bash se
+  existir (incl. o git portátil de `<hermes>/tools/git-*`), senão
+  `powershell.exe`; `HERMES_COCKPIT_SHELL` sobrepõe. Depende de python3 — no
+  Windows o relay usa o venv do Hermes ou `<hermes>/tools/python-*`.
+- Swarm no Windows: as fronteiras de plataforma estão em `swarm/lib/platform.mjs`
+  (BIN_DIRS/PATHEXT, `killTree` por `taskkill /T`, linha de comando de um pid por
+  `Win32_Process`, `spawnSpec` para .cmd). Três armadilhas: (a) o Windows **não
+  entrega SIGTERM** — `TerminateProcess` é imediato, o handler do runner nunca
+  roda, então quem cancela (`cancelRun` em `lib/runs.mjs` e `cancel()` em
+  `src/main/ipc/swarm.ts`) derruba a árvore e grava a meta ele mesmo; (b) um
+  `.cmd` não pode ir ao `CreateProcess` (CVE-2024-27980) — se for shim do npm,
+  `spawnSpec` chama o `node` no `cli.js` de destino (sem perdas), senão passa
+  pelo `cmd.exe`, onde `%VAR%` é expandido e argumento com quebra de linha é
+  truncado; (c) `env.PATH = ...` sobre um `{...process.env}` cria uma SEGUNDA
+  chave (a do Windows é `Path`) e o filho fica com PATH ambíguo — sempre apagar
+  a chave antiga primeiro e juntar com `path.delimiter`.
 - Swarm: Bash somente-leitura é autoaprovado pelo Claude Code (não gera card).
   Workers rodam com `--setting-sources=` (nenhuma fonte: sem plugins/hooks nem
   settings do repo, que poderiam liberar tools sem aprovação);
