@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { register as registerClipboard } from './clipboard'
 import { register as registerFlows } from './flows'
 import { register as registerNotion } from './notion'
 import { register as registerOps } from './ops'
@@ -49,5 +50,6 @@ export function registerDomainIpc(): void {
   registerNotion()
   registerFlows()
   registerShell()
+  registerClipboard()
   registerWindows()
 }

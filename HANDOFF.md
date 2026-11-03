@@ -255,3 +255,59 @@ Worktrees em `~/.hermes/cockpit/worktrees/<repo>-<runId>` (branch
 - Integração (esta rodada): `serve` agora sobe com `cwd = $HOME` (default-cwd
   útil); `hermes:api` valida `..` só no pathname; `ops:open` aceita também
   `x-apple.systempreferences:...?Privacy_*`; `stopSwarmWatch()` no quit.
+## 10. Teclado e clipboard do Terminal integrado (2026-11-02)
+
+O Terminal do dock (`components/devtools/XtermView.tsx` + relay de PTY em
+`src/main/ipc/shell.ts`) passou a seguir o padrão Windows Terminal / VS Code.
+
+**Mapa (fonte de verdade: `src/renderer/src/lib/term-keys.ts`, testado em
+`term-keys.test.ts`).** A função pura `keyAction({key,ctrl,shift,meta,alt,
+hasSelection,platform})` devolve `copy | paste | sigint | select-all |
+zoom-in | zoom-out | zoom-reset | pass`; `pass` e `sigint` seguem para o xterm
+(que manda ao PTY), o resto o XtermView executa e cancela a tecla.
+
+| Tecla | Windows/Linux | macOS |
+|---|---|---|
+| Ctrl+C | com seleção: copia + limpa seleção · sem seleção: `\x03` | sempre `\x03` |
+| ⌘C | — | com seleção copia; sem seleção passa (menu Edit) |
+| Ctrl+V · Ctrl+Shift+V · Shift+Insert | cola (`term.paste`) | ⌘V cola; Ctrl+V = `\x16` |
+| Ctrl+Shift+C · Ctrl+Insert | copia (nunca interrompe) | ⌘⇧C copia |
+| Ctrl+A | vai ao shell (início da linha) | ⌘A seleciona o buffer; Ctrl+A ao shell |
+| Ctrl+Shift+A | seleciona o buffer | ⌘A |
+| Ctrl+= / Ctrl+- / Ctrl+0 | fonte do terminal (8–28px, padrão 12) | ⌘=/⌘-/⌘0 |
+| Botão direito | com seleção copia, senão cola | igual |
+| Alt / AltGr (ctrl+alt) | sempre vai ao shell (teclado ABNT2) | igual |
+
+**Clipboard pelo main.** `ops:clipboard.read|write` (`src/main/ipc/clipboard.ts`,
+domínio `ops`, sem mudança no preload) — `navigator.clipboard.readText()` é
+negado pelo `setPermissionCheckHandler` de `src/main/index.ts`, que só libera
+`media`. Helper do renderer: `lib/clipboard.ts` (cai no `navigator.clipboard`
+no `dev:web`). Copiar usa `term.getSelection()` (linhas sem espaço à direita,
+CRLF no Windows); colar usa `term.paste()` (CRLF→CR + bracketed paste).
+
+**Menu Edit (gotcha novo).** No Windows/Linux os aceleradores do menu são
+registrados NO SISTEMA e chegam antes do renderer: com `role: 'editMenu'` cru,
+Ctrl+C virava `webContents.copy()` (o PTY nunca via `\x03`) e Ctrl+A chamava
+`selectAll()` do Chromium. `src/main/menu.ts` monta o Edit com
+`registerAccelerator: false` em undo/redo/cut/copy/paste/delete/selectAll — os
+itens e os rótulos continuam no menu, e o Chromium segue tratando
+copiar/colar/selecionar nativamente em inputs e em seleção de texto comum
+(ambos validados no app). No macOS o menu fica intacto (`role: 'editMenu'`).
+Testes: `src/main/menu.test.ts`.
+
+**Atalhos globais × terminal.** `App.tsx` chama `terminalWantsEvent(e)` antes de
+tratar os atalhos: com o foco dentro de um `[data-term-host]`, as teclas do
+terminal vencem (Ctrl+Shift+V = colar, não ditado; Ctrl+=/-/0 = fonte do PTY,
+não escala da UI). Todo o resto (⌘K, views ⌘1..⌘9, espaços ⌘⇧1/2/3, ⌘B, ⌘J,
+⌘T, ⌘.) continua global, inclusive com o terminal focado — ou seja, Ctrl+B,
+Ctrl+J, Ctrl+K e Ctrl+T NÃO chegam ao shell (tmux/readline), que é o
+comportamento anterior, mantido de propósito.
+
+**Smoke.** `node scripts/smoke-term-keys.mjs` (CDP, app de verdade; usa
+`release/win-unpacked` se existir, senão o Electron de dev sobre `out/`).
+Substitui o `hermes serve` por um stub via `HERMES_BIN` — sem isso, com um
+Hermes já rodando na máquina o `serve` recusa a segunda instância, o
+`hermes:backend` rejeita e o App troca o cockpit pela tela "Falha ao subir o
+backend" (o Terminal desmonta e qualquer teste de GUI falha por motivo errado;
+vale para `smoke:win` também). O item 7 (injeção de tecla do SO) sai PULADO
+quando a janela não está em primeiro plano no SO.
