@@ -2,12 +2,11 @@ import type { ComponentType } from 'react'
 import {
   AgendaWidget,
   InboxWidget,
-  QuotaWidget,
-  RailQuotaWidget,
   SistemaWidget,
   TimeboxWidget,
   type WidgetProps,
 } from '../components/panels/widgets'
+import { QuotaWidget, RailQuotaWidget } from '../components/panels/quota'
 import { AgendaWeekWidget, CronWidget, QuotaGaugesWidget, SwarmActivityWidget } from '../components/panels/insights'
 import { NotionTasksWidget } from '../components/notion/NotionTasksWidget'
 import type { IconName } from '../components/ui/Icon'
@@ -84,14 +83,22 @@ export const PANELS: PanelDef[] = [
     icon: 'activity',
     descricao: 'runs e custo por hora (12h)',
   },
-  { id: 'cota-gauges', titulo: 'Cota · gauges', componente: QuotaGaugesWidget, fonte: ['/quota'], refreshMs: 60_000, icon: 'gauge', descricao: 'orçamento e janelas de cada provedor' },
-  { id: 'quota', titulo: 'Provedores · cota', componente: QuotaWidget, fonte: ['/quota'], refreshMs: 60_000, icon: 'money', descricao: 'gasto do mês e barras por provedor' },
+  { id: 'cota-gauges', titulo: 'Cota · gauges', componente: QuotaGaugesWidget, fonte: ['quota:get', '/quota'], refreshMs: 60_000, icon: 'gauge', descricao: 'gauges das janelas de cada provedor' },
+  {
+    id: 'quota',
+    titulo: 'Provedores · cota',
+    componente: QuotaWidget,
+    fonte: ['quota:get', '/quota'],
+    refreshMs: 60_000,
+    icon: 'money',
+    descricao: 'uma aba por provedor, com a janela de 5h e a semanal',
+  },
   { id: 'sistema', titulo: `Sistema · ${HOST_LABEL}`, componente: SistemaWidget, fonte: ['/sistema'], refreshMs: 15_000, icon: 'cpu', descricao: 'CPU, RAM, disco, gateway e ollama (host do agente)' },
   {
     id: 'cota-rail',
     titulo: 'Provedores · cota (compacto)',
     componente: RailQuotaWidget,
-    fonte: ['/quota'],
+    fonte: ['quota:get', '/quota'],
     refreshMs: 60_000,
     icon: 'money',
     descricao: 'versão compacta para o rodapé da rail',

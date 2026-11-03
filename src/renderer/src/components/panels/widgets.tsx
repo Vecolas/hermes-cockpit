@@ -6,12 +6,6 @@ import { usePluginSource } from './source'
 import {
   API,
   calendarColor,
-  fmtReset,
-  fmtTokens,
-  providerUsage,
-  totalTokens,
-  quotaWindows,
-  worstWindow,
   type Agenda,
   type AgendaEvent,
   type Foco,
@@ -19,7 +13,6 @@ import {
   type InboxItem,
   type Notion,
   type NotionTask,
-  type Quota,
   type Sistema,
 } from './types'
 
@@ -329,100 +322,6 @@ export function AgendaWidget({ refreshMs }: WidgetProps) {
   )
 }
 
-// ─── Cota (resumo) ───────────────────────────────────────────────────────────
-export function QuotaWidget({ refreshMs }: WidgetProps) {
-  const quota = usePluginSource<Quota>(API.quota, refreshMs)
-  const q = quota.data
-  const provs = q?.provedores ?? []
-  const total = totalTokens(provs)
-  return (
-    <PanelFrame
-      titulo="Provedores · cota"
-      fonte={q?.mes ? `mês ${q.mes}` : undefined}
-      error={quota.error}
-      loading={quota.loading}
-      empty={!quota.loading && !q}
-      onRefresh={quota.refresh}
-    >
-      {q && (
-        <div className="space-y-1.5">
-          {total != null && (
-            <div className="text-[11px] text-dim">
-              consumo <span className="text-amber">{fmtTokens(total)} tokens</span>
-            </div>
-          )}
-          {provs.map((p, i) => (
-            <ProviderRow key={i} p={p} />
-          ))}
-        </div>
-      )}
-    </PanelFrame>
-  )
-}
-
-export function ProviderRow({ p }: { p: NonNullable<Quota['provedores']>[number] }) {
-  const ws = quotaWindows(p)
-  const worst = worstWindow(p)
-  // Uso do mês: tokens por padrão; US$ só para cota explicitamente em créditos.
-  const monthly = providerUsage(p).text ?? ''
-  const right = worst ? `${Math.round(worst.pct)}%` : monthly || '—'
-  const tone = i2tone(p.nome)
-  return (
-    <div role="group" aria-label={`Cota ${p.nome ?? 'provedor'}`}>
-      <div className="flex items-baseline justify-between gap-2 text-[11px]">
-        <span className="truncate text-ink" title={[p.nome, p.plano].filter(Boolean).join(' · ')}>
-          {p.nome}
-          {p.plano ? <span className="text-faint"> · {p.plano}</span> : null}
-        </span>
-        <span className="shrink-0 text-[10px] text-dim" title={worst ? `maior uso: ${worst.label}` : undefined}>
-          {right}
-        </span>
-      </div>
-      {ws.length === 0 && <Bar pct={null} tone={tone} />}
-      {ws.length > 0 && (
-        <ul className="mt-0.5 space-y-1">
-          {ws.map((w, i) => {
-            const r = fmtReset(w.reset)
-            return (
-              <li key={`${w.label}-${i}`} aria-label={`${w.label} ${Math.round(w.pct)}%${r ? `, reset ${r.short}` : ''}`}>
-                <div className="flex items-baseline justify-between gap-2 text-[9px]">
-                  <span className="truncate text-dim">{w.label}</span>
-                  <span className="shrink-0 tabular-nums text-faint">
-                    {r && (
-                      <span title={r.full} className="mr-1.5">
-                        reset {r.short}
-                      </span>
-                    )}
-                    <span className="text-dim">{Math.round(w.pct)}%</span>
-                  </span>
-                </div>
-                <Bar pct={w.pct} tone={tone} />
-              </li>
-            )
-          })}
-        </ul>
-      )}
-      {(monthly || p.aviso) && (
-        <div className="mt-0.5 truncate text-[9px] text-faint" title={[monthly && `mês: ${monthly}`, p.aviso].filter(Boolean).join(' — ')}>
-          {monthly && <>mês {monthly}</>}
-          {monthly && p.aviso && ' · '}
-          {p.aviso && <span className="text-amber/80">{p.aviso}</span>}
-        </div>
-      )}
-      {ws.length === 0 && !monthly && !p.aviso && <div className="mt-0.5 text-[9px] text-faint">sem janela de limite</div>}
-    </div>
-  )
-}
-
-// Tom da barra derivado do nome do provedor (hash estável) — sem lista fixa de
-// provedores: a cota é data-driven, quem aparece é o que o plugin devolver.
-const TONES = ['amber', 'phos', 'cyanic'] as const
-function i2tone(nome?: string): 'amber' | 'phos' | 'cyanic' {
-  let h = 0
-  for (const ch of nome ?? '') h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return TONES[h % TONES.length]
-}
-
 // ─── Sistema (host do agente) ───────────────────────────────────────────────
 export function SistemaWidget({ refreshMs }: WidgetProps) {
   const sys = usePluginSource<Sistema>(API.sistema, refreshMs)
@@ -490,32 +389,5 @@ export function SwarmWidget() {
       empty
       emptyText="sem dados de execuções do swarm — o plugin ainda não expõe subagents (P2-15)."
     />
-  )
-}
-
-/** Cota compacta para o rodapé da rail (região "rail"). */
-export function RailQuotaWidget({ refreshMs }: WidgetProps) {
-  const quota = usePluginSource<Quota>(API.quota, refreshMs || 60_000)
-  const provs = quota.data?.provedores ?? []
-  return (
-    <div className="h-full overflow-y-auto px-3 py-2.5">
-      <div className="label mb-1.5 flex items-center gap-2">
-        <span>Provedores · cota</span>
-        {quota.error && (
-          <span className="truncate normal-case tracking-normal text-alert" title={quota.error}>
-            erro
-          </span>
-        )}
-      </div>
-      {quota.loading && <SkeletonLines lines={4} />}
-      {!quota.loading && provs.length === 0 && (
-        <div className="text-[10px] text-faint">{quota.error ? 'cota indisponível' : 'sem provedores'}</div>
-      )}
-      <div className="space-y-2">
-        {provs.map((p, i) => (
-          <ProviderRow key={`${p.nome}-${i}`} p={p} />
-        ))}
-      </div>
-    </div>
   )
 }

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { setAutoMode, useAutoMode } from '../../lib/automode'
+import { useQuota } from '../../lib/quota'
+import { fmtResetParts, pctTone, snapshotWorstPct, TONE_VAR } from '../../lib/quota-model'
 import type { ConnState } from '../../lib/rpc'
 import { HOST_LABEL } from '../../lib/platform'
 import { Bar } from '../panels/PanelFrame'
 import { usePluginSource } from '../panels/source'
-import { API, fmtReset, quotaWindows, worstWindow, type Quota, type Sistema } from '../panels/types'
+import { API, type Sistema } from '../panels/types'
 import { Icon, type IconName } from '../ui/Icon'
 import { cx } from '../ui/cx'
 
@@ -25,7 +27,7 @@ interface Row {
   tone: Tone
   value: ReactNode
   detail: string
-  windows?: Array<{ key: string; prov: string; label: string; pct: number; reset?: string | null }>
+  windows?: Array<{ key: string; prov: string; label: string; pct: number; reset: string | null; kind: string }>
 }
 
 /**
@@ -35,7 +37,7 @@ interface Row {
  */
 export function StatusCenter({ connState }: { connState: ConnState }) {
   const sistema = usePluginSource<Sistema>(API.sistema, 30_000)
-  const quota = usePluginSource<Quota>(API.quota, 60_000)
+  const quota = useQuota(60_000)
   const auto = useAutoMode()
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
@@ -87,24 +89,34 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
     value: 'sem fonte',
     detail: 'o plugin cockpit ainda não expõe o estado do Telegram (plataformas do gateway)',
   }
-  const q = quota.data
+  const q = quota.plugin
   const spend =
     typeof q?.gasto_brl === 'number' && typeof q.budget_brl === 'number' && q.budget_brl > 0 ? (q.gasto_brl / q.budget_brl) * 100 : null
-  const worstProv = Math.max(-1, ...(q?.provedores ?? []).map((p) => worstWindow(p)?.pct ?? -1))
+  // Pior janela entre TODOS os provedores (Claude/Codex do main + plugin).
+  const worstProv = snapshotWorstPct(quota.providers) ?? -1
   const cota: Row = {
     id: 'quota',
     icon: 'money',
-    label: 'Cota do mês',
-    ...(quota.error
-      ? { tone: 'bad' as Tone, value: 'erro', detail: `/quota: ${quota.error}` }
-      : !q
-        ? { tone: 'off' as Tone, value: '…', detail: 'aguardando /quota' }
-        : {
-            tone: ((spend ?? 0) >= 90 || worstProv >= 90 ? 'bad' : (spend ?? 0) >= 75 || worstProv >= 75 ? 'warn' : 'ok') as Tone,
-            value: q.gasto_brl != null ? `R$ ${q.gasto_brl.toFixed(0)} / ${q.budget_brl?.toFixed(0) ?? '?'}` : '—',
-            detail: `US$ ${q.gasto_usd?.toFixed(2) ?? '?'} × câmbio ${q.fx ?? '?'} · mês ${q.mes ?? '?'}`,
-            windows: (q.provedores ?? []).flatMap((p) => quotaWindows(p).map((w) => ({ key: `${p.nome}-${w.label}`, prov: p.nome ?? '?', label: w.label, pct: w.pct, reset: w.reset }))),
-          }),
+    label: 'Cota dos provedores',
+    ...(quota.providers.length === 0
+      ? quota.error
+        ? { tone: 'bad' as Tone, value: 'erro', detail: `cota: ${quota.error}` }
+        : quota.loading
+          ? { tone: 'off' as Tone, value: '…', detail: 'coletando cota dos provedores' }
+          : { tone: 'off' as Tone, value: 's/ fonte', detail: 'nenhum provedor de IA autenticado nesta máquina' }
+      : {
+          tone: ((spend ?? 0) >= 90 || worstProv >= 90 ? 'bad' : (spend ?? 0) >= 80 || worstProv >= 80 ? 'warn' : 'ok') as Tone,
+          value: worstProv >= 0 ? `${Math.round(worstProv)}%` : '—',
+          detail: [
+            q?.gasto_brl != null ? `mês R$ ${q.gasto_brl.toFixed(0)}` : null,
+            `${quota.providers.length} provedor(es): ${quota.providers.map((p) => p.label).join(', ')}`,
+          ]
+            .filter(Boolean)
+            .join(' · '),
+          windows: quota.providers.flatMap((p) =>
+            p.windows.map((w, i) => ({ key: `${p.provider}-${w.kind}-${i}`, prov: p.label, label: w.label, pct: w.usedPct, reset: w.resetsAt, kind: w.kind })),
+          ),
+        }),
   }
   const rows = [ws, mac, tg, cota]
   const worst = rows.reduce<Tone>((w, r) => (RANK[r.tone] > RANK[w] ? r.tone : w), 'ok')
@@ -127,7 +139,9 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
             <span key={r.id} className={cx('h-1.5 w-1.5 rounded-full transition-colors duration-[var(--hc-dur-3)]', DOT[r.tone])} />
           ))}
         </span>
-        <span className={cx('hc-pill-label tabular-nums', cota.tone === 'bad' && 'text-alert')}>{q ? cota.value : 'status'}</span>
+        <span className={cx('hc-pill-label tabular-nums', cota.tone === 'bad' && 'text-alert')}>
+          {quota.providers.length > 0 ? cota.value : 'status'}
+        </span>
         {auto && (
           <span className="flex items-center gap-1 rounded-sm bg-phos/10 px-1 text-[9px] font-semibold tracking-[0.14em] text-phos uppercase">
             <Icon name="auto" size={10} />
@@ -154,14 +168,16 @@ export function StatusCenter({ connState }: { connState: ConnState }) {
                   {r.windows && r.windows.length > 0 && (
                     <ul className="mt-1 space-y-0.5" aria-label="janelas de uso por provedor">
                       {r.windows.map((w) => {
-                        const rs = fmtReset(w.reset)
+                        const rs = fmtResetParts(w.reset)
                         return (
-                          <li key={w.key} className="flex items-baseline gap-1.5 text-[10px]" title={rs?.full}>
+                          <li key={w.key} className="flex items-baseline gap-1.5 text-[10px]" title={rs ? `reinicia em ${rs.in} (${rs.at})` : undefined}>
                             <span className="min-w-0 flex-1 truncate text-dim">
                               {w.prov} · {w.label}
                             </span>
-                            {rs && <span className="shrink-0 text-[9px] text-faint">reset {rs.short}</span>}
-                            <span className={cx('w-8 shrink-0 text-right tabular-nums', w.pct >= 90 ? 'text-alert' : 'text-dim')}>{Math.round(w.pct)}%</span>
+                            {rs && <span className="shrink-0 text-[9px] text-faint">{w.kind === '5h' ? `em ${rs.in}` : rs.at}</span>}
+                            <span className="w-8 shrink-0 text-right tabular-nums" style={{ color: TONE_VAR[pctTone(w.pct)] }}>
+                              {Math.round(w.pct)}%
+                            </span>
                           </li>
                         )
                       })}
